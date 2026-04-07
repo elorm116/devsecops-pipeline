@@ -17,6 +17,7 @@ concurrency:
 permissions:
   contents: read
   security-events: write
+  issues: write
 
 jobs:
   # ── Fast Security Gates ─────────────────────────────────────
