@@ -2,9 +2,9 @@ name: DevSecOps Pipeline
 
 on:
   push:
-    branches: [main]
+    branches: [ main ]
   pull_request:
-    branches: [main]
+    branches: [ main ]
 
 env:
   IMAGE_NAME: devsecops-api
@@ -50,7 +50,7 @@ jobs:
           exit-code: '1'
           severity: HIGH,CRITICAL
 
-  # ── Build Once (export as artifact so later jobs can use it) ─
+  # ── Build Docker Image Once ─────────────────────────────────
   build:
     name: Build Docker Image
     runs-on: ubuntu-latest
@@ -58,7 +58,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - name: Build image (export)
+      - name: Build and Export Docker Image
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -66,88 +66,82 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           outputs: type=docker,dest=/tmp/image.tar
-      - name: Upload image artifact
+      - name: Upload Docker Image Artifact
         uses: actions/upload-artifact@v4
         with:
           name: docker-image
           path: /tmp/image.tar
 
-  # ── Container & IaC Scanning ───────────────────────────────
+  # ── Container Scan ──────────────────────────────────────────
   container-scan:
     name: Container Scan — Trivy
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Download image artifact
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: docker-image
           path: /tmp
-      - name: Load image
+      - name: Load Docker Image
         run: docker load -i /tmp/image.tar
-      - name: Scan image (SARIF)
-        uses: aquasecurity/trivy-action@v0.35.0
+      - uses: aquasecurity/trivy-action@v0.35.0
         with:
           image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
           format: sarif
           output: trivy-results.sarif
           severity: HIGH,CRITICAL
-          exit-code: "0"
       - uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-results.sarif
 
+  # ── IaC Scan ────────────────────────────────────────────────
   iac-scan:
     name: IaC Scan — Checkov
     needs: build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: bridgecrewio/checkov-action@v12.1347.0
         with:
-          python-version: "3.11"
-      - name: Install Checkov
-        run: pip install checkov==3.2.517
-      - name: Run Checkov
-        run: checkov -d terraform/ --framework terraform --soft-fail
+          directory: terraform/
+          framework: terraform
+          soft_fail: true
 
-  # ── DAST on local "staging" container ─────────────────────
+  # ── DAST ────────────────────────────────────────────────────
   dast:
     name: DAST — OWASP ZAP
     needs: [container-scan, iac-scan]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Download image artifact
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: docker-image
           path: /tmp
-      - name: Load image
+      - name: Load Docker Image
         run: docker load -i /tmp/image.tar
-      - name: Start staging container
+      - name: Start Staging Container
         run: |
           docker run -d --name staging-app \
             -p ${{ env.CONTAINER_PORT }}:${{ env.CONTAINER_PORT }} \
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
-      - name: Wait for app
+      - name: Wait for Application
         run: |
           for i in {1..30}; do
-            if curl -fsS "http://localhost:${{ env.CONTAINER_PORT }}/health" >/dev/null; then
+            if curl -fsS "http://localhost:${{ env.CONTAINER_PORT }}/health" >/dev/null 2>&1; then
               echo "App is healthy."
               exit 0
             fi
-            echo "Waiting for app... ($i/30)"
+            echo "Waiting... ($i/30)"
             sleep 2
           done
-          echo "App did not become healthy in time."
+          echo "App failed to become healthy."
           exit 1
-      - name: Run ZAP baseline
+      - name: Run OWASP ZAP Baseline Scan
         uses: zaproxy/action-baseline@v0.15.0
         with:
           target: http://localhost:${{ env.CONTAINER_PORT }}
           rules_file_name: .zap/rules.tsv
           cmd_options: -I
-      - name: Stop container
+      - name: Stop Container
         if: always()
         run: docker rm -f staging-app || true
