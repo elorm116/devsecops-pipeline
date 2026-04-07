@@ -28,7 +28,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install bandit[toml]==1.7.8
+      - run: pip install bandit[toml]==1.9.4
       - name: Run Bandit
         run: bandit -r app/ -f json -o bandit-report.json --severity-level medium || true
       - uses: actions/upload-artifact@v4
@@ -42,13 +42,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: aquasecurity/trivy-action@v0.35.0
+      - uses: aquasecurity/trivy-action@v0.69.3
         with:
           scan-type: fs
           scan-ref: .
-          security-checks: secret
           format: table
-          exit-code: "1"
+          exit-code: '1'
           severity: HIGH,CRITICAL
 
   # ── Build Once (export as artifact so later jobs can use it) ─
@@ -87,7 +86,7 @@ jobs:
       - name: Load image
         run: docker load -i /tmp/image.tar
       - name: Scan image (SARIF)
-        uses: aquasecurity/trivy-action@v0.35.0
+        uses: aquasecurity/trivy-action@v0.69.3
         with:
           image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
           format: sarif
@@ -104,7 +103,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: bridgecrewio/checkov-action@v12.1347.0
+      - uses: bridgecrewio/checkov-action@3.2.517
         with:
           directory: terraform/
           framework: terraform
