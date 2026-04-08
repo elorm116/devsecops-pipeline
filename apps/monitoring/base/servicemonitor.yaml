@@ -1,0 +1,18 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: devsecops-api
+  namespace: monitoring
+  labels:
+    release: kube-prometheus
+spec:
+  namespaceSelector:
+    matchNames:
+      - devsecops-app
+  selector:
+    matchLabels:
+      app: devsecops-api
+  endpoints:
+  - port: http
+    path: /metrics
+    interval: 15s

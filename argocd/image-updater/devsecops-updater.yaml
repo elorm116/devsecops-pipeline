@@ -1,0 +1,23 @@
+apiVersion: argocd-image-updater.argoproj.io/v1alpha1
+kind: ImageUpdater
+metadata:
+  name: devsecops-updater
+  namespace: argocd
+spec:
+  interval: 2m
+  applications:
+  - name: devsecops-app
+    imageSpec:
+    - image: 393818036545.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-secure
+      updateStrategy: latest
+  writeBackConfig:
+    method: git
+    gitConfig:
+      branch: main
+      commitMessage: "Update image to {{ .Image }} by Argo CD Image Updater"
+  pullSecret: ecr-credentials
+  commonUpdateSettings:
+    allowedSourceTypes:
+    - kustomize
+    platforms:
+    - linux/arm64
