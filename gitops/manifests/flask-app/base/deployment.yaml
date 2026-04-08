@@ -1,3 +1,4 @@
+
 # gitops/manifests/flask-app/base/deployment.yaml
 #
 # Base manifest — image tag is a placeholder.
@@ -41,7 +42,7 @@ spec:
           type: RuntimeDefault    # restrict syscalls — best practice 2026
       containers:
         - name: api
-          image: 393818036545.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-secure:latest
+          image: 393818036545.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline:latest
           imagePullPolicy: Always
           ports:
             - name: http
@@ -62,6 +63,9 @@ spec:
             readOnlyRootFilesystem: true   # container can't write to its own fs
             capabilities:
               drop: ["ALL"]               # drop all Linux capabilities
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp            # Gunicorn writes worker temp files here
           livenessProbe:
             httpGet:
               path: /health
@@ -81,6 +85,11 @@ spec:
               port: http
             failureThreshold: 12
             periodSeconds: 5
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory   # RAM-backed — fast, ephemeral, no SD card I/O
+            sizeLimit: 32Mi  # Gunicorn temp files are tiny — cap it
       imagePullSecrets:
         - name: ecr-secret
       topologySpreadConstraints:         # spread pods across nodes if you add a 2nd Pi
