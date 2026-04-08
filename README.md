@@ -311,7 +311,7 @@ exec /usr/local/bin/gunicorn: exec format error
   with:
     platforms: linux/amd64,linux/arm64
     push: true
-    tags: ${{ steps.ecr-login.outputs.registry }}/devsecops-pipeline:latest
+    tags: ${{ steps.ecr-login.outputs.registry }}/devsecops-pipeline-secure:latest
 ```
 
 **Result:** A single ECR image tag now carries both architecture layers. Each environment pulls the layer it needs automatically.
