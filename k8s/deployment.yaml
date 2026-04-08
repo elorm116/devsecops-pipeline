@@ -1,0 +1,96 @@
+################################################################################
+# deployment.yaml — Flask app workload
+################################################################################
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: devsecops-api
+  namespace: devsecops-app
+  labels:
+    app: devsecops-api
+    version: "1.0.0"
+spec:
+  replicas: 2                        # two pods — demonstrates HA on a single node
+  selector:
+    matchLabels:
+      app: devsecops-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0              # zero-downtime deploys
+  template:
+    metadata:
+      labels:
+        app: devsecops-api
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "5000"
+        prometheus.io/path: "/metrics"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+
+      containers:
+        - name: api
+          image: 393818036545.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5000
+              name: http
+
+          env:
+            - name: APP_ENV
+              value: "production"
+
+          # Resource limits — important on Pi (8GB RAM, shared with k3s overhead)
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "250m"
+
+          # Liveness — k8s restarts the pod if this fails
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+
+          # Readiness — k8s only sends traffic once this passes
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+      # Pull from ECR — requires imagePullSecret (created below)
+      imagePullSecrets:
+        - name: ecr-secret
+
+---
+################################################################################
+# service.yaml — exposes the deployment inside the cluster
+################################################################################
+apiVersion: v1
+kind: Service
+metadata:
+  name: devsecops-api
+  namespace: devsecops-app
+  labels:
+    app: devsecops-api
+spec:
+  selector:
+    app: devsecops-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: 5000
+  type: ClusterIP

@@ -1,0 +1,24 @@
+################################################################################
+# ingress.yaml — Traefik routes external traffic to the app
+# Replace YOUR_DOMAIN with your actual domain e.g. api.noah.dev
+################################################################################
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: devsecops-api
+  namespace: devsecops-app
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: learndevops.site
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: devsecops-api
+                port:
+                  number: 80
