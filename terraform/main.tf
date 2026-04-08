@@ -102,10 +102,6 @@ resource "aws_route_table_association" "public_b" {
   route_table_id = aws_route_table.public.id
 }
 
-################################################################################
-# Security Group
-################################################################################
-
 resource "aws_security_group" "app" {
   name        = "${var.project_name}-sg"
   description = "Allow HTTP and app traffic"
