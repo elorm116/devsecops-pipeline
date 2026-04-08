@@ -1,3 +1,9 @@
+# DevSecOps Security Policy
+# -------------------------
+# FAIL: High-risk vulnerabilities that block deployment (OWASP Top 10)
+# WARN: Information disclosure and minor misconfigurations
+# IGNORE: Header-based security handled by AWS ALB
+
 10016	IGNORE	(Web Browser XSS Protection Not Enabled)
 10017	IGNORE	(Cross-Domain JavaScript Source File Inclusion)
 10020	IGNORE	(X-Frame-Options Header Not Set)
