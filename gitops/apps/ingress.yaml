@@ -25,10 +25,12 @@ spec:
       ref: values
   destination:
     server: https://kubernetes.default.svc
-    namespace: traefik
+    namespace: kube-system # Traefik is a cluster-level component, so we deploy to kube-system. ArgoCD can manage resources across namespaces.
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+      - Replace=true
+      - ServerSideApply=true

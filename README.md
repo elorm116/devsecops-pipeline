@@ -4,134 +4,168 @@
 ![Security Gates](https://img.shields.io/badge/security%20gates-5%20passing-brightgreen?logo=shield)
 ![IaC](https://img.shields.io/badge/IaC-Terraform-7B42BC?logo=terraform)
 ![Cloud](https://img.shields.io/badge/cloud-AWS-FF9900?logo=amazonaws)
-![k8s](https://img.shields.io/badge/kubernetes-k3s-326CE5?logo=kubernetes)
+![Kubernetes](https://img.shields.io/badge/kubernetes-k3s-326CE5?logo=kubernetes)
 ![GitOps](https://img.shields.io/badge/GitOps-ArgoCD-EF7B4D?logo=argo)
 ![Multi-arch](https://img.shields.io/badge/image-amd64%20%7C%20arm64-blue?logo=docker)
+![Kustomize](https://img.shields.io/badge/config-Kustomize-FF6C37)
 
-A production-grade DevSecOps platform built across two environments: a cloud deployment on AWS and a self-hosted Kubernetes homelab running on a Raspberry Pi 5. Security is automated at every stage — five gates run on every commit, infrastructure is provisioned as code, and the running application is continuously monitored and GitOps-managed.
+A production-grade DevSecOps platform built and debugged from scratch across two live environments — AWS cloud and a self-hosted Kubernetes cluster running on a Raspberry Pi 5. Security is automated at every stage of the delivery lifecycle. Infrastructure is code. Deployments are Git commits. The cluster manages itself.
 
----
-
-## What makes this different
-
-Most pipeline projects test code and deploy it. This one treats security as a first-class citizen throughout the entire delivery lifecycle, runs a real Kubernetes cluster on physical hardware, and implements GitOps so the cluster self-heals from GitHub.
-
-The troubleshooting section at the bottom documents four real production issues encountered and resolved during the build — architecture mismatches, image desync, kubeconfig context collisions, and service port mapping. These aren't hypothetical; they happened.
+Everything in this repo was built, broken, and fixed in real conditions. The troubleshooting ledger at the bottom documents five production issues encountered and resolved during the build — not hypothetical, not from a tutorial.
 
 ---
 
 ## Live endpoints
 
-| Environment | URL |
-|---|---|
-| AWS (via ALB) | `http://devsecops-pipeline-alb-2018761014.us-east-1.elb.amazonaws.com` |
-| Pi homelab (via Cloudflare Tunnel) | `https://api.nalorwu.com` |
-| Health check | `/health` |
-| Prometheus metrics | `/metrics` |
-
-Note: The AWS endpoint is available only while the Terraform stack is applied (it’s common to `terraform destroy` after validation to avoid ongoing costs).
+| Environment | URL | Notes |
+|---|---|---|
+| AWS (Application Load Balancer) | `http://devsecops-pipeline-alb-2018761014.us-east-1.elb.amazonaws.com` | Provisioned by Terraform (often destroyed to avoid cost) |
+| Pi homelab (Cloudflare Tunnel) | `https://api.nalorwu.com` | k3s on Raspberry Pi 5, zero open ports |
+| Health check | `/health` | Used by Kubernetes liveness/readiness probes |
+| Prometheus metrics | `/metrics` | Scraped by Prometheus |
 
 ---
 
-## Architecture
+## How the system works
 
-### Full system
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  Developer pushes to GitHub                                     │
-└────────────────────────┬────────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  GitHub Actions — DevSecOps Pipeline                            │
-│                                                                 │
-│  [SAST: Bandit] ──┐                                             │
-│                   ├──▶ [Docker build] ──▶ [Container: Trivy] ──┐│
-│  [Secrets: Trivy]─┘         │              [IaC: Checkov]    ──┤│
-│                             │ push (amd64 + arm64)             ││
-│                             ▼                                  ││
-│                    [ECR — multi-arch manifest]                  ││
-│                             │                                  ││
-│                             ▼                                  ││
-│                    [DAST: OWASP ZAP (local)]                    │
-└─────────────────────────────────────────────────────────────────┘
-          │                                    │
-          ▼                                    ▼
-┌──────────────────┐               ┌────────────────────────────┐
-│  AWS             │               │  Raspberry Pi 5 Homelab    │
-│                  │               │                            │
-│  ALB             │               │  k3s (Kubernetes)          │
-│   └▶ EC2 (TF)    │               │   ├─ devsecops-api (x2)    │
-│       └▶ Docker  │               │   ├─ ArgoCD (GitOps)       │
-│                  │               │   ├─ Prometheus + Grafana  │
-│  ECR (registry)  │               │   └─ Traefik ingress       │
-│  S3  (tf state)  │               │                            │
-│  IAM (roles)     │               │  Cloudflare Tunnel         │
-│  CloudWatch      │               │   └▶ api.nalorwu.com       │
-└──────────────────┘               └────────────────────────────┘
-```
-
-### GitOps loop (Raspberry Pi)
+### The full delivery loop
 
 ```
-Developer pushes k8s/ manifest change to GitHub
-       │
-       │  ArgoCD polls continuously
-       ▼
-ArgoCD detects drift between repo and cluster state
-       │
-       ▼
-Automatic kubectl apply
-       │
-       ▼
-Cluster converges to match repo ✓
+Developer pushes to GitHub
+         │
+         ▼
+┌─────────────────────────────────────────────────────┐
+│  GitHub Actions — DevSecOps Pipeline                │
+│                                                     │
+│  [SAST: Bandit] ──────────────────────────┐         │
+│                                           ├─▶ PASS  │
+│  [Secrets: Trivy] ────────────────────────┘         │
+│            │ (parallel)                             │
+│            ▼                                        │
+│  [Docker build — linux/amd64 + linux/arm64]         │
+│            │                                        │
+│            ▼                                        │
+│  [Container scan: Trivy] ─────────────────┐         │
+│                                           ├─▶ PASS  │
+│  [IaC scan: Checkov] ─────────────────────┘         │
+│            │ (parallel)                             │
+│            ▼                                        │
+│  [Push image to ECR — tagged sha-<commit>]          │
+│            │                                        │
+│            ▼                                        │
+│  [DAST: OWASP ZAP — scans local staging app]        │
+│            │                                        │
+│            ▼                                        │
+│  [Commit new tag to Git]  ◀── GitOps                │
+│            │                                        │
+│            ▼                                        │
+│   ArgoCD detects commit → rolling deploy to Pi      │
+└─────────────────────────────────────────────────────┘
+         │                          │
+         ▼                          ▼
+┌─────────────────┐    ┌─────────────────────────────┐
+│  AWS (optional) │    │  Raspberry Pi 5              │
+│  ALB → EC2 (TF) │    │  k3s cluster                 │
+│  Docker         │    │  ├─ flask-app (replicas)     │
+│                 │    │  ├─ ArgoCD                   │
+│  ECR  S3  IAM   │    │  ├─ Prometheus + Grafana     │
+│  CloudWatch     │    │  └─ Traefik ingress          │
+└─────────────────┘    │  Cloudflare Tunnel           │
+                       │  → api.nalorwu.com           │
+                       └─────────────────────────────┘
+```
+
+### GitOps loop — how the Pi stays in sync
+
+```
+git push (any change)
+    │
+    ▼
+Pipeline builds sha-tagged image → pushes to ECR
+    │
+    ▼
+Pipeline commits updated image tag to:
+gitops/manifests/flask-app/overlays/pi/patch-image.yaml
+    │
+    ▼
+ArgoCD detects the Git commit (polls continuously)
+    │
+    ▼
+Kustomize renders base/ + overlays/pi/ patches
+    │
+    ▼
+kubectl apply → zero-downtime rolling deploy
+new pod Running → old pod Terminated
+    │
+    ▼
+Cluster state matches Git state ✓
+Every deploy is a Git commit. Every rollback is a git revert.
 ```
 
 ---
 
 ## Security gates
 
-| Gate | Tool | Mode | What it catches |
-|------|------|------|----------------|
-| SAST | Bandit | Warn | Insecure Python — unsafe `eval()`, hardcoded secrets, weak crypto, shell injection |
-| Secret scan | Trivy | **Hard fail** | API keys, tokens, credentials committed to source — blocks the pipeline entirely |
-| Container scan | Trivy | Warn | CVEs in base image and installed packages |
-| IaC scan | Checkov | Warn | Terraform misconfigs — open security groups, unencrypted S3, overpermissive IAM |
-| DAST | OWASP ZAP | Warn | Runtime vulnerabilities — missing headers, exposed endpoints, XSS, injection points |
+| Gate | Tool | Failure mode | What it catches |
+|------|------|-------------|----------------|
+| SAST | Bandit | Warn + artifact | Insecure Python — `eval()`, shell injection, hardcoded secrets, weak crypto |
+| Secret scan | Trivy | **Hard fail** | Credentials/API keys/tokens committed to source — blocks pipeline entirely |
+| Container scan | Trivy | Warn + artifact | CVEs in base image layers and installed packages |
+| IaC scan | Checkov | Warn + artifact | Terraform misconfigs — open security groups, unencrypted S3, overpermissive IAM |
+| DAST | OWASP ZAP | Warn + artifact | Runtime vulnerabilities — missing headers, exposed endpoints, XSS, injection points |
 
-Secret scanning is the only hard-fail gate. All other gates produce downloadable reports without blocking deploys — a pragmatic choice for a solo project where findings are reviewed rather than auto-blocked.
+Secret scanning is the only hard-fail gate. A committed credential stops the pipeline immediately — nothing ships. All other gates produce downloadable scan reports saved as GitHub Actions artifacts.
 
-Every scan report is uploaded as a GitHub Actions artifact and downloadable from the Actions tab.
+All five gates run on every push to `main` and on every pull request.
+
+---
+
+## Architecture decisions
+
+**GitOps with pipeline-driven tag commits** — ArgoCD Image Updater was evaluated but the simplest, most auditable pattern is having the pipeline commit the new image SHA directly to `patch-image.yaml` in Git. ArgoCD detects the commit and syncs. Every deploy is a traceable Git commit with author, timestamp, and SHA. Rollback is `git revert`.
+
+**Kustomize over plain YAML or Helm** — Kustomize is built into `kubectl` and ArgoCD natively. The base/overlay pattern keeps a single canonical set of manifests and applies environment-specific patches on top. The pipeline only ever touches one file — `overlays/pi/patch-image.yaml`.
+
+**App of Apps pattern** — one root ArgoCD Application manages all others from `gitops/apps/`. Applied once by hand. After that, ArgoCD manages itself and the entire cluster from Git.
+
+**Multi-source Helm in ArgoCD** — Prometheus and Traefik are installed via Helm charts but with values files stored in this repo. ArgoCD's multi-source feature pulls the upstream chart and our values together.
+
+**Multi-architecture Docker image** — GitHub Actions runners are `x86_64`. The Pi is ARM64. The pipeline builds a single multi-arch manifest using QEMU and Buildx. One ECR tag, two architecture layers.
+
+**Hardened pod security context** — containers run as non-root (UID 1000), with `readOnlyRootFilesystem: true`, `allowPrivilegeEscalation: false`, and all Linux capabilities dropped. A `Memory`-backed `emptyDir` volume is mounted at `/tmp` to give Gunicorn the writable scratch space it needs.
+
+**Cloudflare Tunnel over port forwarding** — the Pi has zero open inbound ports. Cloudflare Tunnel creates an outbound-only encrypted connection to Cloudflare's edge network.
 
 ---
 
 ## Tech stack
 
 **Application**
-- Python 3.12, Flask, Gunicorn
-- `prometheus-flask-exporter` — native `/metrics` endpoint
-- `flask-limiter` — rate limiting (in-memory; Redis planned for multi-replica sync)
+- Python 3.12, Flask 3.0, Gunicorn
+- `prometheus-flask-exporter` — `/metrics` endpoint for Prometheus scraping
+- `flask-limiter` — rate limiting
 
-**Pipeline**
-- GitHub Actions
-- Bandit, Trivy, Checkov, OWASP ZAP
-- `docker/buildx` + QEMU — multi-architecture builds (`linux/amd64` + `linux/arm64`)
+**Pipeline — GitHub Actions**
+- Bandit (SAST), Trivy (secrets + container), Checkov (IaC), OWASP ZAP (DAST)
+- `docker/setup-qemu-action` + `docker/setup-buildx-action` — multi-arch builds
+- `docker/build-push-action` — `linux/amd64,linux/arm64` in one manifest
+- GitOps write-back commit to `gitops/manifests/flask-app/overlays/pi/patch-image.yaml`
 
-**AWS infrastructure** (Terraform — 22 resources)
-- EC2 `t2.micro` behind an Application Load Balancer
-- ECR with scan-on-push and 10-image lifecycle policy
-- VPC, public subnet, internet gateway, route tables, security groups
-- IAM role with least-privilege policy (ECR pull + CloudWatch write only)
-- S3 remote state with versioning enabled
-- CloudWatch CPU alarm
+**AWS infrastructure — Terraform**
+- VPC, subnet, internet gateway, route tables
+- Application Load Balancer + target group + listener
+- EC2 `t2.micro`, security groups
+- ECR with scan-on-push + lifecycle policy
+- IAM role + policy + instance profile (least privilege)
+- S3 remote state with versioning
 
-**Kubernetes homelab** (Raspberry Pi 5 — Ubuntu 25.10 aarch64)
-- k3s — lightweight Kubernetes for ARM
-- ArgoCD — GitOps continuous delivery, watches `k8s/` directory
-- Traefik — ingress controller on NodePort 30080
-- Prometheus + Grafana via `kube-prometheus-stack`
-- Cloudflare Tunnel — public HTTPS, zero open inbound ports
+**Kubernetes — Raspberry Pi 5, Ubuntu aarch64**
+- k3s — lightweight Kubernetes for ARM, single-node
+- ArgoCD — GitOps continuous delivery, App of Apps pattern
+- Kustomize — base/overlay manifest management
+- Traefik — ingress controller
+- kube-prometheus-stack — Prometheus + Grafana + Alertmanager
+- Cloudflare Tunnel (`cloudflared`) — public HTTPS, zero open ports
 
 ---
 
@@ -140,25 +174,40 @@ Every scan report is uploaded as a GitHub Actions artifact and downloadable from
 ```
 devsecops-pipeline/
 ├── app/
-│   ├── main.py                  # Flask API
-│   └── requirements.txt         # Pinned dependencies
-├── k8s/
-│   ├── namespace.yaml           # devsecops-app namespace
-│   ├── deployment.yaml          # 2-replica Deployment + Service
-│   ├── ingress.yaml             # Traefik ingress (api.nalorwu.com)
-│   └── servicemonitor.yaml      # Prometheus ServiceMonitor
+│   ├── main.py                        # Flask API
+│   └── requirements.txt               # Pinned dependencies
+│
+├── Dockerfile                         # Multi-stage, non-root, multi-arch
+│
 ├── terraform/
-│   ├── main.tf                  # VPC, EC2, ECR, ALB, IAM, CloudWatch
+│   ├── main.tf                        # AWS resources
 │   ├── variables.tf
 │   ├── outputs.tf
-│   ├── backend.tf               # S3 remote state
-│   └── userdata.sh              # EC2 bootstrap
-├── .github/
-│   └── workflows/
-│       └── pipeline.yaml        # Full CI + security pipeline
-├── .zap/
-│   └── rules.tsv                # OWASP ZAP rule configuration
-└── Dockerfile                   # Multi-stage, non-root, multi-arch
+│   ├── backend.tf                     # S3 remote state
+│   └── userdata.sh                    # EC2 bootstrap
+│
+├── gitops/
+│   ├── apps/                          # ArgoCD Application definitions
+│   │   ├── app-of-apps.yaml           # Root app — manages all others
+│   │   ├── flask-app.yaml             # Points at overlays/pi/
+│   │   ├── monitoring.yaml            # kube-prometheus-stack via Helm
+│   │   └── ingress.yaml               # Traefik via Helm
+│   │
+│   └── manifests/
+│       ├── flask-app/
+│       │   ├── base/
+│       │   └── overlays/
+│       │       └── pi/
+│       │           ├── patch-image.yaml   # ← pipeline updates this
+│       │           └── patch-replicas.yaml
+│       ├── monitoring/
+│       │   └── values.yaml
+│       └── ingress/
+│           └── values.yaml
+│
+└── .github/
+    └── workflows/
+        └── pipeline.yaml               # Full CI/CD + security gates
 ```
 
 ---
@@ -182,15 +231,17 @@ docker run -p 5000:5000 devsecops-api
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /` | Service info |
+| `GET /` | Service info and environment |
 | `GET /health` | Health check |
 | `GET /info` | System info |
-| `GET /data` | Sample data (rate-limited: 30 req/min) |
+| `GET /data` | Sample data |
 | `GET /metrics` | Prometheus scrape endpoint |
 
 ---
 
 ## Deploying to AWS
+
+AWS is intentionally treated as optional: it’s common to `terraform destroy` after validation to avoid ongoing costs.
 
 ```bash
 # 1. Create S3 bucket for Terraform state
@@ -205,10 +256,9 @@ aws s3api put-bucket-versioning \
 aws ec2 create-key-pair \
   --key-name devsecops-key \
   --query 'KeyMaterial' \
-  --output text > ~/.ssh/devsecops-key.pem
-chmod 400 ~/.ssh/devsecops-key.pem
+  --output text > ~/.ssh/devsecops-key.pem && chmod 400 ~/.ssh/devsecops-key.pem
 
-# 3. Deploy
+# 3. Provision everything
 cd terraform
 terraform init
 terraform apply \
@@ -216,94 +266,65 @@ terraform apply \
   -var="allowed_ssh_cidr=$(curl -s ifconfig.me)/32"
 ```
 
-Terraform outputs the EC2 IP, ALB DNS, ECR URL, and health check URL. On every push to `main`, the pipeline builds the image, runs security gates, and publishes multi-arch images to ECR.
-
-How the AWS deploy works:
-- GitHub Actions publishes the container image to ECR.
-- Terraform provisions the ALB + EC2 stack.
-- On instance boot, [terraform/userdata.sh](terraform/userdata.sh) authenticates to ECR and runs the container.
-
-Cost control:
-```bash
-cd terraform
-terraform destroy
-```
-
-GitHub Actions secrets required (for ECR push):
+GitHub Actions secrets required:
 
 | Secret | Value |
 |--------|-------|
 | `AWS_ACCESS_KEY_ID` | IAM user access key |
-| `AWS_SECRET_ACCESS_KEY` | IAM user secret key |
+| `AWS_SECRET_ACCESS_KEY` | IAM user secret |
+| `GITOPS_PAT` | GitHub PAT with repo write scope (pipeline commits GitOps tag updates) |
 
 ---
 
-## Deploying to the Pi homelab
+## Deploying the GitOps cluster (Pi)
 
 ```bash
-# Create ECR pull secret
-ECR_TOKEN=$(aws ecr get-login-password --region us-east-1)
+# 1. Install k3s
+curl -sfL https://get.k3s.io | sh -s - \
+  --write-kubeconfig-mode 644 \
+  --node-ip $(ip -4 addr show wlan0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}') \
+  --flannel-iface wlan0 \
+  --disable traefik \
+  --disable servicelb
+
+# 2. Install ArgoCD (the only manual install)
+kubectl create namespace argocd
+kubectl apply -n argocd \
+  -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+
+# 3. Create ECR pull secret
+kubectl create namespace devsecops-app
 kubectl create secret docker-registry ecr-secret \
   --namespace devsecops-app \
   --docker-server=393818036545.dkr.ecr.us-east-1.amazonaws.com \
   --docker-username=AWS \
-  --docker-password=$ECR_TOKEN
+  --docker-password=$(aws ecr get-login-password --region us-east-1)
 
-# Apply manifests (ArgoCD manages these going forward)
-kubectl apply -f k8s/
+# 4. Apply the root application — this is the only manual kubectl apply
+kubectl apply -f gitops/apps/app-of-apps.yaml
+
+# 5. Watch ArgoCD bootstrap the entire cluster from Git
+kubectl -n argocd get applications -w
 ```
-
-To manage the cluster remotely from a MacBook using Tailscale:
-
-```bash
-# Point kubectl at the Pi
-export KUBECONFIG=~/.kube/pi-config
-# Pi Tailscale IP: 100.78.23.120
-
-# Convenience alias
-alias kpi="KUBECONFIG=~/.kube/pi-config kubectl"
-```
-
-Test the app through Traefik directly:
-
-```bash
-curl -i -H "Host: api.nalorwu.com" http://<PI_IP>:30080/health
-```
-
----
-
-## Key design decisions
-
-**Multi-architecture image** — the pipeline builds for both `linux/amd64` and `linux/arm64` in a single manifest using QEMU and Buildx. EC2 pulls `amd64`; the Pi pulls `arm64`. One tag, two platforms, zero manual steps.
-
-**Non-root container** — the app runs as `appuser` (UID 1000). Exploiting a vulnerability doesn't grant root inside the container.
-
-**GitOps with ArgoCD** — Kubernetes manifests live in Git. ArgoCD continuously reconciles cluster state against the repo. The cluster self-heals; manual `kubectl apply` is only used for bootstrapping.
-
-**Cloudflare Tunnel** — the Pi has no open inbound ports. The tunnel creates an outbound-only encrypted connection to Cloudflare's edge. No home IP exposed, no firewall rules required.
-
-**ALB over direct EC2 exposure** — the Application Load Balancer provides a stable DNS name, health-based routing, and decouples the public endpoint from the underlying instance.
-
-**Least-privilege IAM** — the EC2 role can pull from ECR and write to CloudWatch. Nothing else.
-
-**Parallel security gates** — SAST and secret scanning run in parallel; container and IaC scanning run in parallel after the build. Full coverage without doubling pipeline time.
 
 ---
 
 ## Troubleshooting ledger
 
-Real issues hit during the build and how they were resolved.
+Five real issues encountered and resolved during the build.
 
 ### 1. Exec format error — architecture mismatch
 
-**Symptom:** Pods on the Pi stuck in `CrashLoopBackOff`. Logs showed:
+**Symptom:** Pods on the Pi stuck in `CrashLoopBackOff` immediately after deployment.
+
 ```
 exec /usr/local/bin/gunicorn: exec format error
 ```
 
-**Root cause:** GitHub Actions runners are `x86_64`. The image was built for Intel and couldn't execute on the Pi's ARM64 processor.
+**Root cause:** GitHub Actions runners are `x86_64`. The Docker image was built for Intel and cannot execute on the Pi's ARM64 processor.
 
-**Fix:** Added multi-architecture build to the pipeline:
+**Fix:** Multi-architecture build in the pipeline:
+
 ```yaml
 - uses: docker/setup-qemu-action@v4
 - uses: docker/setup-buildx-action@v4
@@ -311,39 +332,29 @@ exec /usr/local/bin/gunicorn: exec format error
   with:
     platforms: linux/amd64,linux/arm64
     push: true
-    tags: ${{ steps.ecr-login.outputs.registry }}/devsecops-pipeline-secure:latest
+    tags: ${{ env.ECR }}:sha-${{ github.sha }}
 ```
-
-**Result:** A single ECR image tag now carries both architecture layers. Each environment pulls the layer it needs automatically.
 
 ---
 
-### 2. ECR image desync — pods not updating after push
+### 2. ECR image desync — Pi not updating after a new push
 
-**Symptom:** New image pushed to ECR. The Pi kept running the old container.
+**Symptom:** New image pushed to ECR. Pi kept running the old container.
 
-**Root cause:** Kubernetes doesn't re-pull an image if the tag (`:latest`) hasn't changed, even if the underlying layers have.
+**Root cause:** Kubernetes does not re-pull an image if the tag hasn't changed.
 
-**Immediate fix:**
-```bash
-kubectl rollout restart deployment devsecops-api -n devsecops-app
-```
-
-**Permanent fix:** The pipeline now tags images with both `:latest` and `:<git-sha>`. The deployment manifest references the SHA-tagged image, so every push produces a unique tag that forces a pull.
+**Fix:** SHA-tagged images and a GitOps commit strategy. The pipeline tags every image with `sha-<github.sha>` and commits the new tag to `overlays/pi/patch-image.yaml`. ArgoCD detects the Git change and redeploys.
 
 ---
 
 ### 3. kubectl context collision — MacBook targeting wrong cluster
 
-**Symptom:** `kubectl` commands from the MacBook were hitting the local context instead of the Pi cluster.
+**Symptom:** `kubectl` commands from the MacBook applied to the local context instead of the Pi cluster.
 
-**Fix:** Dedicated kubeconfig using the Pi's Tailscale IP:
+**Fix:** Dedicated kubeconfig file for the Pi using its Tailscale IP:
+
 ```bash
 export KUBECONFIG=~/.kube/pi-config
-```
-
-Added to `~/.zshrc` with an alias so both contexts can coexist:
-```bash
 alias kpi="KUBECONFIG=~/.kube/pi-config kubectl"
 alias klocal="KUBECONFIG=~/.kube/config kubectl"
 ```
@@ -354,12 +365,28 @@ alias klocal="KUBECONFIG=~/.kube/config kubectl"
 
 **Symptom:** `kubectl port-forward` failed with `Service does not have a service port 5000`.
 
-**Root cause:** The Service maps front-end port `80` to `targetPort 5000`. Port-forwarding requires the Service's front-end port, not the container port.
+**Root cause:** The Kubernetes Service maps front-end port `80` to `targetPort 5000`.
 
 **Fix:**
+
 ```bash
 kubectl port-forward svc/devsecops-api 5001:80 -n devsecops-app
 ```
+
+---
+
+### 5. readOnlyRootFilesystem blocking Gunicorn worker temp files
+
+**Symptom:** Pods crash with:
+
+```
+FileNotFoundError: [Errno 2] No usable temporary directory found in
+['/tmp', '/var/tmp', '/usr/tmp', '/app']
+```
+
+**Root cause:** `readOnlyRootFilesystem: true` locks `/tmp`, but Gunicorn needs a writable temp directory.
+
+**Fix:** Mount a `Memory`-backed `emptyDir` at `/tmp`.
 
 ---
 
@@ -368,14 +395,15 @@ kubectl port-forward svc/devsecops-api 5001:80 -n devsecops-app
 | Item | Status | Plan |
 |------|--------|------|
 | Flask-Limiter in-memory storage | Open | Deploy Redis to sync rate-limit state across pod replicas |
-| ECR pull secret expiry | Open | Kubernetes CronJob to refresh the token automatically |
-| Single-node k3s | By design | HA requires a second Pi — out of scope for now |
-| Terraform state locking | Open | Add DynamoDB table if the project grows to a team |
+| ECR pull secret expiry | Open | Kubernetes CronJob to refresh the token on a schedule |
+| Grafana persistence | Open | Persistent volume claim so dashboards survive pod restarts |
+| Single-node k3s | By design | HA requires a second Pi |
 
 ---
 
 ## Author
 
-Anthony | DevOps & Cloud Engineer
-[GitHub](https://github.com/elorm116) · [LinkedIn](https://linkedin.com/in/)
+Anthony — DevOps & Cloud Engineer
+
+[GitHub](https://github.com/elorm116) · [LinkedIn](https://linkedin.com/inaezottor/) · [Live demo](https://api.nalorwu.com)
 
