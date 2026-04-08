@@ -53,11 +53,12 @@ Every gate produces a downloadable artifact (scan report). If any gate fails, th
 ┌─────────────────────────────────────────────────────────────┐
 │                        AWS                                  │
 │                                                             │
-│   VPC → Public Subnet → EC2 (t2.micro) → Docker container  │
-│                    ↑                                        │
-│              ECR (image registry)                           │
-│              S3  (Terraform state)                          │
-│              IAM (least-privilege roles)                    │
+│   VPC → (2) Public Subnets → ALB → ASG (2x EC2) → Container │
+│                           ↑                                  │
+│                    ECR (image registry)                     │
+│                    S3  (Terraform state)                    │
+│                    IAM (least-privilege roles)              │
+│                    SSM (Session Manager — no SSH)           │
 └─────────────────────────────────────────────────────────────┘
                   ▼
 ┌─────────────────────────────────────────────────────────────┐
@@ -100,10 +101,12 @@ Each scan uploads its report as a GitHub Actions artifact. Download them from th
 
 **Infrastructure**
 - Terraform (IaC)
-- AWS EC2 (t2.micro — free tier)
+- AWS ALB + Auto Scaling Group (rolling updates, reduced downtime)
+- AWS EC2 (instance type configurable)
 - AWS ECR (container registry)
 - AWS S3 (Terraform remote state)
 - AWS VPC + Security Groups + IAM
+- AWS SSM Session Manager (admin access without SSH)
 
 **Monitoring**
 - Prometheus
@@ -119,6 +122,10 @@ devsecops-pipeline/
 ├── app/
 │   ├── main.py              # Flask API (health, info, data, metrics endpoints)
 │   └── requirements.txt     # Pinned dependencies
+├── terraform-bootstrap/
+│   ├── main.tf              # Creates S3 bucket used by Terraform remote state
+│   ├── variables.tf         # Bootstrap inputs (bucket name/region)
+│   └── outputs.tf
 ├── terraform/
 │   ├── main.tf              # Core AWS resources
 │   ├── variables.tf         # Input variables
@@ -172,9 +179,15 @@ Endpoints:
 **Prerequisites**: AWS CLI configured, Terraform installed
 
 ```bash
-cd terraform
+cd terraform-bootstrap
 
-# Initialise (creates S3 backend)
+# 1) Create the remote state backend (S3)
+terraform init
+terraform apply
+
+cd ../terraform
+
+# 2) Initialise Terraform with the S3 backend
 terraform init
 
 # Preview what will be created
@@ -184,9 +197,29 @@ terraform plan
 terraform apply
 ```
 
-This provisions: VPC, public subnet, EC2 instance, ECR registry, IAM role with least-privilege policy, and security group (ports 22, 80, 5000).
+This provisions: VPC, two public subnets, ALB + Auto Scaling Group, ECR repo, IAM role with least-privilege policy, and security groups.
 
-After `apply`, Terraform outputs the EC2 public IP. The pipeline automatically deploys the container on every push to `main`.
+After `apply`, Terraform outputs an `alb_url` — use that as the primary entrypoint.
+
+Admin access is via **SSM Session Manager** (no inbound SSH/port 22 and no key pairs).
+
+On each push to `main`, the GitHub Actions pipeline builds the Docker image and pushes it to ECR with tags `latest` and the git SHA.
+
+---
+
+## Destroying AWS resources
+
+Destroy the main infrastructure first, then (optionally) the bootstrap backend.
+
+```bash
+cd terraform
+terraform destroy
+
+cd ../terraform-bootstrap
+terraform destroy
+```
+
+Note: the bootstrap S3 bucket is protected by `prevent_destroy = true` by default. To destroy it, you must remove or disable that lifecycle rule first.
 
 ---
 
