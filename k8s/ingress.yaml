@@ -12,7 +12,7 @@ metadata:
 spec:
   ingressClassName: traefik
   rules:
-    - host: learndevops.site
+    - host: api.nalorwu.com
       http:
         paths:
           - path: /
