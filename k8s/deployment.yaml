@@ -35,7 +35,7 @@ spec:
 
       containers:
         - name: api
-          image: 393818036545.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline:latest
+          image: 393818036545.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-secure:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 5000

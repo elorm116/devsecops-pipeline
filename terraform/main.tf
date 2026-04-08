@@ -29,6 +29,8 @@ locals {
     Owner       = var.team_name
     Cluster     = var.cluster_name
   }
+
+  ecr_secure_repository_name = "${var.project_name}-secure"
 }
 
 # merge() combines common_tags with resource-specific tags.
@@ -61,7 +63,7 @@ resource "aws_subnet" "public" {
   vpc_id                  = aws_vpc.main.id
   cidr_block              = "10.0.1.0/24"
   availability_zone       = "${var.aws_region}a"
-  map_public_ip_on_launch = true
+  map_public_ip_on_launch = false
 
   tags = merge(local.common_tags, {
     Name = "${var.project_name}-public-subnet"
@@ -72,7 +74,7 @@ resource "aws_subnet" "public_b" {
   vpc_id                  = aws_vpc.main.id
   cidr_block              = "10.0.2.0/24"
   availability_zone       = "${var.aws_region}b"
-  map_public_ip_on_launch = true
+  map_public_ip_on_launch = false
 
   tags = merge(local.common_tags, {
     Name = "${var.project_name}-public-subnet-b"
@@ -112,20 +114,11 @@ resource "aws_security_group" "app" {
 
   # App port
   ingress {
-    description = "App"
-    from_port   = 5000
-    to_port     = 5000
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  # HTTP (for future nginx/load balancer)
-  ingress {
-    description = "HTTP"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    description     = "App"
+    from_port       = 5000
+    to_port         = 5000
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb.id]
   }
 
   # Prometheus (internal scrape)
@@ -138,6 +131,7 @@ resource "aws_security_group" "app" {
   }
 
   egress {
+    description = "All outbound"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -163,6 +157,7 @@ resource "aws_security_group" "alb" {
   }
 
   egress {
+    description = "All outbound"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -255,11 +250,69 @@ resource "aws_iam_instance_profile" "ec2_profile" {
 }
 
 ################################################################################
+# KMS — Customer-managed key for ECR
+################################################################################
+
+################################################################################
 # ECR — Container registry
 ################################################################################
 
-resource "aws_ecr_repository" "app" {
-  name                 = var.project_name
+data "aws_caller_identity" "current" {}
+
+resource "aws_kms_key" "ecr" {
+  description             = "${var.project_name} ECR encryption key"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "EnableRootPermissions"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      },
+      {
+        Sid    = "AllowECRUseOfKey"
+        Effect = "Allow"
+        Principal = {
+          Service = "ecr.amazonaws.com"
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey",
+          "kms:CreateGrant"
+        ]
+        Resource = "*"
+        Condition = {
+          Bool = {
+            "kms:GrantIsForAWSResource" = "true"
+          }
+        }
+      }
+    ]
+  })
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-ecr-kms"
+  })
+}
+
+resource "aws_kms_alias" "ecr" {
+  name          = "alias/${var.project_name}-ecr"
+  target_key_id = aws_kms_key.ecr.key_id
+}
+
+resource "aws_ecr_repository" "app_kms" {
+  #checkov:skip=CKV_AWS_51:Tag immutability conflicts with re-pushing convenience tags (e.g., :latest). Prefer SHA tags in deployments.
+  name                 = local.ecr_secure_repository_name
   image_tag_mutability = "MUTABLE"
 
   # Scan on push — free AWS vulnerability scanning
@@ -269,17 +322,18 @@ resource "aws_ecr_repository" "app" {
 
   # Encrypt images at rest
   encryption_configuration {
-    encryption_type = "AES256"
+    encryption_type = "KMS"
+    kms_key         = aws_kms_key.ecr.arn
   }
 
   tags = merge(local.common_tags, {
-    Name = var.project_name
+    Name = local.ecr_secure_repository_name
   })
 }
 
 # Lifecycle policy — keep only the last 10 images (free tier storage limit)
 resource "aws_ecr_lifecycle_policy" "app" {
-  repository = aws_ecr_repository.app.name
+  repository = aws_ecr_repository.app_kms.name
 
   policy = jsonencode({
     rules = [
@@ -300,7 +354,7 @@ resource "aws_ecr_lifecycle_policy" "app" {
 }
 
 ################################################################################
-# EC2 — App server (free tier t2.micro)
+# EC2
 ################################################################################
 
 # Latest Amazon Linux 2023 AMI
@@ -319,71 +373,23 @@ data "aws_ami" "amazon_linux" {
   }
 }
 
-resource "aws_instance" "app" {
-  ami                    = data.aws_ami.amazon_linux.id
-  instance_type          = var.instance_type
-  subnet_id              = aws_subnet.public.id
-  vpc_security_group_ids = [aws_security_group.app.id]
-  iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
-
-  # Bootstrap: install Docker and pull the latest image from ECR
-  user_data = templatefile("${path.module}/userdata.sh", {
-    aws_region         = var.aws_region
-    ecr_repository_url = aws_ecr_repository.app.repository_url
-    project_name       = var.project_name
-    image_tag          = var.image_tag
-  })
-
-  metadata_options {
-    http_tokens = "required"
-  }
-
-  root_block_device {
-    volume_size           = 20
-    volume_type           = "gp3"
-    encrypted             = true
-    delete_on_termination = true
-  }
-
-  tags = merge(local.common_tags, {
-    Name = "${var.project_name}-server"
-  })
-}
-
-################################################################################
-# CloudWatch — Basic alarms
-################################################################################
-
-resource "aws_cloudwatch_metric_alarm" "high_cpu" {
-  alarm_name          = "${var.project_name}-high-cpu"
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = 2
-  metric_name         = "CPUUtilization"
-  namespace           = "AWS/EC2"
-  period              = 120
-  statistic           = "Average"
-  threshold           = 80
-  alarm_description   = "CPU above 80% for 4 minutes"
-
-  dimensions = {
-    InstanceId = aws_instance.app.id
-  }
-
-  tags = merge(local.common_tags, {
-    Name = "${var.project_name}-high-cpu"
-  })
-}
-
 ################################################################################
 # Zero-downtime serving layer — ALB + ASG (2 instances)
 ################################################################################
 
 resource "aws_lb" "app" {
+  #checkov:skip=CKV_AWS_150:Deletion protection disabled to support routine teardown for cost control.
   name               = "${var.project_name}-alb"
   load_balancer_type = "application"
   internal           = false
   security_groups    = [aws_security_group.alb.id]
   subnets            = [aws_subnet.public.id, aws_subnet.public_b.id]
+
+  access_logs {
+    bucket  = aws_s3_bucket.alb_logs.bucket
+    prefix  = "${var.project_name}/alb"
+    enabled = true
+  }
 
   tags = merge(local.common_tags, {
     Name = "${var.project_name}-alb"
@@ -430,7 +436,13 @@ resource "aws_launch_template" "app" {
   image_id      = data.aws_ami.amazon_linux.id
   instance_type = var.instance_type
 
-  vpc_security_group_ids = [aws_security_group.app.id]
+  ebs_optimized = true
+
+  network_interfaces {
+    device_index                = 0
+    associate_public_ip_address = true
+    security_groups             = [aws_security_group.app.id]
+  }
 
   iam_instance_profile {
     name = aws_iam_instance_profile.ec2_profile.name
@@ -438,7 +450,7 @@ resource "aws_launch_template" "app" {
 
   user_data = base64encode(templatefile("${path.module}/userdata.sh", {
     aws_region         = var.aws_region
-    ecr_repository_url = aws_ecr_repository.app.repository_url
+    ecr_repository_url = aws_ecr_repository.app_kms.repository_url
     project_name       = var.project_name
     image_tag          = var.image_tag
   }))
@@ -470,6 +482,67 @@ resource "aws_launch_template" "app" {
     resource_type = "volume"
     tags          = merge(local.common_tags, { Name = "${var.project_name}-volume" })
   }
+}
+
+################################################################################
+# ALB access logs — S3 bucket
+################################################################################
+
+resource "aws_s3_bucket" "alb_logs" {
+  bucket_prefix = "${var.project_name}-alb-logs-"
+  force_destroy = true
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-alb-logs"
+  })
+}
+
+resource "aws_s3_bucket_public_access_block" "alb_logs" {
+  bucket = aws_s3_bucket.alb_logs.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "alb_logs" {
+  bucket = aws_s3_bucket.alb_logs.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+data "aws_elb_service_account" "this" {}
+
+resource "aws_s3_bucket_policy" "alb_logs" {
+  bucket = aws_s3_bucket.alb_logs.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AWSALBLogs"
+        Effect = "Allow"
+        Principal = {
+          AWS = data.aws_elb_service_account.this.arn
+        }
+        Action   = "s3:PutObject"
+        Resource = "${aws_s3_bucket.alb_logs.arn}/${var.project_name}/alb/*"
+      },
+      {
+        Sid    = "AWSALBLogBucketAcl"
+        Effect = "Allow"
+        Principal = {
+          AWS = data.aws_elb_service_account.this.arn
+        }
+        Action   = "s3:GetBucketAcl"
+        Resource = aws_s3_bucket.alb_logs.arn
+      }
+    ]
+  })
 }
 
 resource "aws_autoscaling_group" "app" {

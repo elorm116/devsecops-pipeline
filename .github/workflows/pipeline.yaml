@@ -11,7 +11,7 @@ env:
   CONTAINER_PORT: 5000
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   AWS_REGION: us-east-1
-  ECR_REPOSITORY: devsecops-pipeline
+  ECR_REPOSITORY: devsecops-pipeline-secure
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
