@@ -1,0 +1,38 @@
+# gitops/apps/monitoring.yaml
+#
+# ArgoCD manages Prometheus + Grafana via Helm.
+# "sources" (plural) lets us combine the Helm chart with a custom
+# values file stored in our own repo — best practice for Helm in ArgoCD.
+#
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    # Source 1: the Helm chart from the upstream repo
+    - repoURL: https://prometheus-community.github.io/helm-charts
+      chart: kube-prometheus-stack
+      targetRevision: "*"        # always latest stable
+      helm:
+        releaseName: kube-prometheus
+        valueFiles:
+          - $values/gitops/manifests/monitoring/values.yaml
+    # Source 2: our own repo — provides the values file above
+    - repoURL: https://github.com/elorm116/devsecops-pipeline.git
+      targetRevision: main
+      ref: values               # referenced as $values above
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

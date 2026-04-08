@@ -1,0 +1,24 @@
+# gitops/manifests/flask-app/base/ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: devsecops-api
+  namespace: devsecops-app
+  labels:
+    app.kubernetes.io/name: devsecops-api
+    app.kubernetes.io/managed-by: argocd
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: api.nalorwu.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: devsecops-api
+                port:
+                  name: http

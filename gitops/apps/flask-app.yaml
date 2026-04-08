@@ -1,0 +1,28 @@
+# gitops/apps/flask-app.yaml
+#
+# ArgoCD Application for the Flask API.
+# Points at overlays/pi/ — Kustomize renders base + patch and applies.
+#
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: flask-app
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/elorm116/devsecops-pipeline.git
+    targetRevision: main
+    path: gitops/manifests/flask-app/overlays/pi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: devsecops-app
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true   # handles large CRDs cleanly

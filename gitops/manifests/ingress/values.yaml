@@ -1,0 +1,31 @@
+# gitops/manifests/ingress/values.yaml
+#
+# Traefik values for Pi homelab.
+# NodePort so Cloudflare Tunnel can reach it without a LoadBalancer.
+#
+
+service:
+  type: NodePort
+
+ports:
+  web:
+    nodePort: 30080
+  websecure:
+    nodePort: 30443
+
+resources:
+  requests:
+    memory: 64Mi
+    cpu: 20m
+  limits:
+    memory: 128Mi
+    cpu: 100m
+
+# Access logs — useful for seeing what ZAP and Cloudflare are hitting
+accessLogs:
+  enabled: true
+
+# Dashboard — ClusterIP only, access via port-forward
+api:
+  dashboard: true
+  insecure: true

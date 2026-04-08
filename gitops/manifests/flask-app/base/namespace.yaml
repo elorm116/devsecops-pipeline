@@ -1,0 +1,7 @@
+# gitops/manifests/flask-app/base/namespace.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: devsecops-app
+  labels:
+    app.kubernetes.io/managed-by: argocd

@@ -1,0 +1,34 @@
+# gitops/apps/ingress.yaml
+#
+# ArgoCD manages Traefik via Helm.
+# Same multi-source pattern as monitoring — chart + our values file.
+#
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ingress
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    - repoURL: https://traefik.github.io/charts
+      chart: traefik
+      targetRevision: "*"
+      helm:
+        releaseName: traefik
+        valueFiles:
+          - $values/gitops/manifests/ingress/values.yaml
+    - repoURL: https://github.com/elorm116/devsecops-pipeline.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: traefik
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

@@ -1,0 +1,12 @@
+# gitops/manifests/flask-app/overlays/pi/patch-replicas.yaml
+#
+# Pi is a single node — 2 replicas is the sensible max.
+# If you add a second Pi, bump this to 3.
+#
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: devsecops-api
+  namespace: devsecops-app
+spec:
+  replicas: 2

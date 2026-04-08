@@ -1,0 +1,19 @@
+# gitops/manifests/flask-app/base/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: devsecops-api
+  namespace: devsecops-app
+  labels:
+    app.kubernetes.io/name: devsecops-api
+    app.kubernetes.io/component: api
+    app.kubernetes.io/managed-by: argocd
+spec:
+  selector:
+    app.kubernetes.io/name: devsecops-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http           # references named port in deployment
+      protocol: TCP
+  type: ClusterIP

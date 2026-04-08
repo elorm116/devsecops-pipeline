@@ -1,0 +1,71 @@
+# gitops/manifests/monitoring/values.yaml
+#
+# kube-prometheus-stack values tuned for Raspberry Pi 5 (ARM64, 8GB RAM).
+# Aggressive resource trimming — the Pi also runs the app and Traefik.
+#
+
+grafana:
+  enabled: true
+  adminPassword: changeme       # override with a Kubernetes Secret in production
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 50m
+    limits:
+      memory: 256Mi
+      cpu: 200m
+  persistence:
+    enabled: false              # stateless for now — dashboards loaded via configmap
+  service:
+    type: ClusterIP
+
+prometheus:
+  prometheusSpec:
+    # Only scrape ServiceMonitors in the same namespace or matching label
+    serviceMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelector: {}
+    serviceMonitorNamespaceSelector: {}
+    retention: 7d
+    resources:
+      requests:
+        memory: 256Mi
+        cpu: 100m
+      limits:
+        memory: 512Mi
+        cpu: 300m
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 5Gi     # keep small on Pi SD card / SSD
+
+alertmanager:
+  enabled: true
+  alertmanagerSpec:
+    resources:
+      requests:
+        memory: 64Mi
+        cpu: 20m
+      limits:
+        memory: 128Mi
+        cpu: 100m
+
+# Disable components that are heavy and not needed on a single-node Pi
+kubeEtcd:
+  enabled: false               # k3s uses sqlite not etcd
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
+
+# Node exporter — keep it, it's lightweight and shows Pi system metrics
+nodeExporter:
+  enabled: true
+
+# kube-state-metrics — keep it, powers most Grafana dashboards
+kubeStateMetrics:
+  enabled: true

@@ -1,0 +1,20 @@
+# gitops/manifests/flask-app/base/servicemonitor.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: devsecops-api
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: devsecops-api
+    release: kube-prometheus    # must match Prometheus helm release label
+spec:
+  namespaceSelector:
+    matchNames:
+      - devsecops-app
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: devsecops-api
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
