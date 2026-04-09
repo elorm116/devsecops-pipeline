@@ -14,6 +14,6 @@ spec:
   ports:
     - name: http
       port: 80
-      targetPort: http           # references named port in deployment
+      targetPort: 5000           # references named port in deployment
       protocol: TCP
   type: ClusterIP

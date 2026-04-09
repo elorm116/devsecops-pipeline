@@ -1,10 +1,4 @@
-
 # gitops/manifests/flask-app/base/deployment.yaml
-#
-# Base manifest — image tag is a placeholder.
-# The overlay/pi/patch-image.yaml sets the real tag.
-# The pipeline updates that patch file on every successful build.
-#
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -23,7 +17,7 @@ spec:
     type: RollingUpdate
     rollingUpdate:
       maxSurge: 1
-      maxUnavailable: 0          # zero-downtime rolling deploys
+      maxUnavailable: 1          # Allow one pod to drop during surge to save RAM/CPU on the Pi
   template:
     metadata:
       labels:
@@ -39,7 +33,7 @@ spec:
         runAsGroup: 1000
         fsGroup: 1000
         seccompProfile:
-          type: RuntimeDefault    # restrict syscalls — best practice 2026
+          type: RuntimeDefault
       containers:
         - name: api
           image: 393818036545.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-secure:latest
@@ -53,49 +47,52 @@ spec:
               value: production
           resources:
             requests:
-              memory: 64Mi
-              cpu: 50m
+              memory: 128Mi      # Bumped: Avoid immediate thrashing
+              cpu: 100m          # Bumped: Give K3s more cycles for TLS/Handshakes
             limits:
-              memory: 256Mi
-              cpu: 250m
+              memory: 512Mi      # Bumped: Flask-Limiter + Python 3.12 overhead
+              cpu: 500m
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true   # container can't write to its own fs
+            readOnlyRootFilesystem: true
             capabilities:
-              drop: ["ALL"]               # drop all Linux capabilities
+              drop: ["ALL"]
           volumeMounts:
             - name: tmp
-              mountPath: /tmp            # Gunicorn writes worker temp files here
+              mountPath: /tmp
+          # RELAXED PROBES: Prevents "Context Deadline Exceeded" on slow hardware
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            failureThreshold: 24 # 2 minutes total (24 * 5s)
+            periodSeconds: 5
           livenessProbe:
             httpGet:
               path: /health
-              port: http
-            initialDelaySeconds: 15
-            periodSeconds: 20
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 30    # Check less often to reduce CPU overhead
+            timeoutSeconds: 5     # Essential: Don't kill pod if Pi is just "busy"
             failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /health
-              port: http
+              port: 5000
             initialDelaySeconds: 5
-            periodSeconds: 10
-          startupProbe:                   # gives slow-starting containers time to boot
-            httpGet:
-              path: /health
-              port: http
-            failureThreshold: 12
-            periodSeconds: 5
+            periodSeconds: 15
+            timeoutSeconds: 5     # Essential: Avoid 502s during minor spikes
       volumes:
         - name: tmp
           emptyDir:
-            medium: Memory   # RAM-backed — fast, ephemeral, no SD card I/O
-            sizeLimit: 32Mi  # Gunicorn temp files are tiny — cap it
+            medium: Memory
+            sizeLimit: 32Mi
       imagePullSecrets:
         - name: ecr-secret
-      topologySpreadConstraints:         # spread pods across nodes if you add a 2nd Pi
+      topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname
-          whenUnsatisfiable: DoNotSchedule
+          whenUnsatisfiable: ScheduleAnyway # Change to "ScheduleAnyway" if only 1 node exists
           labelSelector:
             matchLabels:
               app.kubernetes.io/name: devsecops-api

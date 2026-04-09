@@ -8,8 +8,8 @@ metadata:
     app.kubernetes.io/name: devsecops-api
     app.kubernetes.io/managed-by: argocd
   annotations:
-    traefik.ingress.kubernetes.io/router.entrypoints: web, websecure
-    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    kubernetes.io/ingress.class: traefik
 spec:
   ingressClassName: traefik
   rules:
