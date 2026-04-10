@@ -19,8 +19,8 @@ Everything in this repo was built, broken, and fixed in real conditions. The tro
 
 | Environment | URL | Notes |
 |---|---|---|
-| AWS (Application Load Balancer) | `http://devsecops-pipeline-alb-2018761014.us-east-1.elb.amazonaws.com` | Provisioned by Terraform (often destroyed to avoid cost) |
-| Pi homelab (Cloudflare Tunnel) | `https://api.nalorwu.com` | k3s on Raspberry Pi 5, zero open ports |
+| AWS (Application Load Balancer) | `terraform output -raw alb_url` | Provisioned by Terraform (often destroyed to avoid cost) |
+| Pi homelab (Cloudflare Tunnel) | `https://web.learndevops.site` | k3s on Raspberry Pi 5, zero open ports |
 | Health check | `/health` | Used by Kubernetes liveness/readiness probes |
 | Prometheus metrics | `/metrics` | Scraped by Prometheus |
 
@@ -71,7 +71,7 @@ Developer pushes to GitHub
 │  ECR  S3  IAM   │    │  ├─ Prometheus + Grafana     │
 │  CloudWatch     │    │  └─ Traefik ingress          │
 └─────────────────┘    │  Cloudflare Tunnel           │
-                       │  → api.nalorwu.com           │
+                       │  → web.learndevops.site      │
                        └─────────────────────────────┘
 ```
 
@@ -122,7 +122,7 @@ All five gates run on every push to `main` and on every pull request.
 
 ## Architecture decisions
 
-**GitOps with pipeline-driven tag commits** — ArgoCD Image Updater was evaluated but the simplest, most auditable pattern is having the pipeline commit the new image SHA directly to `patch-image.yaml` in Git. ArgoCD detects the commit and syncs. Every deploy is a traceable Git commit with author, timestamp, and SHA. Rollback is `git revert`.
+**GitOps with pipeline-driven tag commits** — ArgoCD Image Updater was evaluated but the simplest, most auditable pattern is having the pipeline commit the new image SHA directly to `patch-image.yaml` in Git. ArgoCD detects the commit and syncs. Every deploy is a traceable Git commit with author, timestamp, and SHA. Rollback is `git revert`. (An optional Image Updater experiment script exists at `scripts/setup-argocd-image-updater.sh`, but it is not used by the default delivery loop.)
 
 **Kustomize over plain YAML or Helm** — Kustomize is built into `kubectl` and ArgoCD natively. The base/overlay pattern keeps a single canonical set of manifests and applies environment-specific patches on top. The pipeline only ever touches one file — `overlays/pi/patch-image.yaml`.
 
@@ -154,7 +154,7 @@ All five gates run on every push to `main` and on every pull request.
 **AWS infrastructure — Terraform**
 - VPC, subnet, internet gateway, route tables
 - Application Load Balancer + target group + listener
-- EC2 `t2.micro`, security groups
+- EC2 instance (configurable via Terraform `instance_type`), security groups
 - ECR with scan-on-push + lifecycle policy
 - IAM role + policy + instance profile (least privilege)
 - S3 remote state with versioning
@@ -186,6 +186,11 @@ devsecops-pipeline/
 │   ├── backend.tf                     # S3 remote state
 │   └── userdata.sh                    # EC2 bootstrap
 │
+├── terraform-bootstrap/                # Creates the S3 state bucket (one-time)
+│   ├── main.tf
+│   ├── variables.tf
+│   └── outputs.tf
+│
 ├── gitops/
 │   ├── apps/                          # ArgoCD Application definitions
 │   │   ├── app-of-apps.yaml           # Root app — manages all others
@@ -204,6 +209,12 @@ devsecops-pipeline/
 │       │   └── values.yaml
 │       └── ingress/
 │           └── values.yaml
+│
+├── scripts/
+│   └── setup-argocd-image-updater.sh   # Optional/legacy alternative deploy mechanism
+│
+├── .zap/
+│   └── rules.tsv                       # OWASP ZAP baseline scan rules
 │
 └── .github/
     └── workflows/
@@ -245,11 +256,12 @@ AWS is intentionally treated as optional: it’s common to `terraform destroy` a
 
 ```bash
 # 1. Create S3 bucket for Terraform state
+#    Must match terraform/backend.tf (default: mali-devsecops-pipeline-tfstate)
 aws s3api create-bucket \
-  --bucket devsecops-pipeline-tfstate \
+  --bucket mali-devsecops-pipeline-tfstate \
   --region us-east-1
 aws s3api put-bucket-versioning \
-  --bucket devsecops-pipeline-tfstate \
+  --bucket mali-devsecops-pipeline-tfstate \
   --versioning-configuration Status=Enabled
 
 # 2. Create EC2 key pair
@@ -301,6 +313,7 @@ kubectl create secret docker-registry ecr-secret \
   --docker-password=$(aws ecr get-login-password --region us-east-1)
 
 # 4. Apply the root application — this is the only manual kubectl apply
+#    If you fork this repo, update repoURL in gitops/apps/*.yaml first.
 kubectl apply -f gitops/apps/app-of-apps.yaml
 
 # 5. Watch ArgoCD bootstrap the entire cluster from Git
@@ -405,5 +418,5 @@ FileNotFoundError: [Errno 2] No usable temporary directory found in
 
 Anthony — DevOps & Cloud Engineer
 
-[GitHub](https://github.com/elorm116) · [LinkedIn](https://linkedin.com/inaezottor/) · [Live demo](https://api.nalorwu.com)
+[GitHub](https://github.com/elorm116) · [LinkedIn](https://linkedin.com/inaezottor/) · [Live demo](https://web.learndevops.site)
 
