@@ -22,8 +22,9 @@ resources:
     cpu: 300m
 
 # Access logs — useful for seeing what ZAP and Cloudflare are hitting
-accessLogs:
-  enabled: true
+logs:
+    access:
+      enabled: true
 
 # Dashboard — ClusterIP only, access via port-forward
 api:
