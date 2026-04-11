@@ -1,0 +1,72 @@
+---
+- name: Hardening and K3s Prep for Victor Cluster
+  hosts: pi_nodes
+  become: yes
+  # vars: ansible_user removed because it is handled by your inventory.ini (user: mali)
+
+  tasks:
+    - name: Update and upgrade apt packages
+      apt:
+        update_cache: yes
+        upgrade: dist
+        cache_valid_time: 3600
+
+    - name: Install essential system tools
+      apt:
+        name:
+          - curl
+          - git
+          - ufw
+          - htop
+          - fail2ban
+          - unattended-upgrades
+        state: present
+
+    - name: Enable cgroups (Required for K3s)
+      lineinfile:
+        path: /boot/firmware/cmdline.txt
+        backrefs: yes
+        # Improved regex to prevent double-appending if the file already has these settings
+        regexp: '^((?!.*cgroup_enable=memory).*rootwait)$'
+        line: '\1 cgroup_enable=cpuset cgroup_memory=1 cgroup_enable=memory'
+      notify: Reboot Pi
+
+    - name: Configure UFW - Allow necessary ports
+      ufw:
+        rule: allow
+        port: "{{ item.port }}"
+        proto: "{{ item.proto | default('tcp') }}"
+      loop:
+        - { port: '22' }             # SSH
+        - { port: '6443' }           # K3s API Server
+        - { port: '80' }             # HTTP (Traefik/ingress)
+        - { port: '443' }            # HTTPS
+        - { port: '8472', proto: 'udp' } # Flannel VXLAN (Very important for K3s!)
+        - { port: '30000:32767', proto: 'tcp' } # NodePort range
+
+    - name: Enable UFW with default deny policy
+      ufw:
+        state: enabled
+        policy: deny
+
+    - name: Set up Fail2Ban for SSH protection
+      copy:
+        dest: /etc/fail2ban/jail.local
+        content: |
+          [sshd]
+          enabled = true
+          maxretry = 4
+          bantime = 1h
+          findtime = 10m
+      notify: Restart Fail2Ban
+
+  handlers:
+    - name: Reboot Pi
+      reboot:
+        msg: "Rebooting to apply cgroup changes for K3s"
+        reboot_timeout: 300
+
+    - name: Restart Fail2Ban
+      service:
+        name: fail2ban
+        state: restarted
