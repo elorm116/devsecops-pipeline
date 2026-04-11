@@ -4,10 +4,10 @@ metadata:
   name: ecr-token-refresher
   namespace: devsecops-app
 spec:
-  schedule: "0 */6 * * *"          # Every 6 hours (safer than 8)
-  successfulJobsHistoryLimit: 5
-  failedJobsHistoryLimit: 5
-  concurrencyPolicy: Forbid        # Prevent overlapping runs
+  schedule: "0 */6 * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
   jobTemplate:
     spec:
       template:
@@ -16,45 +16,36 @@ spec:
           restartPolicy: OnFailure
           containers:
           - name: ecr-token-refresher
-            image: public.ecr.aws/aws-cli/aws-cli:2.34.27
-            imagePullPolicy: IfNotPresent
-            # image: public.ecr.aws/aws-cli/aws-cli:latest   # Alternative
-            
+            image: public.ecr.aws/aws-cli/aws-cli:2.17.0
             command:
             - /bin/sh
             - -c
             - |
               set -euo pipefail
               
+              echo "🔄 Installing kubectl for ARM64..."
+              # Target the ARM64 binary specifically for the Raspberry Pi
+              curl -LO "https://dl.k8s.io/release/v1.30.0/bin/linux/arm64/kubectl"
+              chmod +x ./kubectl
+              
               echo "🔄 Refreshing ECR token..."
               TOKEN=$(aws ecr get-login-password --region us-east-1)
               
-              echo "🗑️  Deleting old secret (if exists)..."
-              kubectl delete secret ecr-secret -n devsecops-app --ignore-not-found=true
+              echo "🗑️ Deleting old secret..."
+              ./kubectl delete secret ecr-secret -n devsecops-app --ignore-not-found=true
               
-              echo "🔑 Creating new docker-registry secret..."
-              kubectl create secret docker-registry ecr-secret \
+              echo "🔑 Creating new docker secret..."
+              ./kubectl create secret docker-registry ecr-secret \
                 --docker-server=393818036545.dkr.ecr.us-east-1.amazonaws.com \
                 --docker-username=AWS \
                 --docker-password="$TOKEN" \
                 -n devsecops-app
               
-              echo "✅ ECR token successfully refreshed!"
+              echo "✅ ECR token refreshed successfully!"
             resources:
               requests:
                 cpu: 100m
                 memory: 128Mi
               limits:
-                cpu: 300m
+                cpu: 200m
                 memory: 256Mi
-            env:
-              - name: AWS_ACCESS_KEY_ID
-                valueFrom:
-                  secretKeyRef:
-                    name: aws-ecr-creds
-                    key: AWS_ACCESS_KEY_ID
-              - name: AWS_SECRET_ACCESS_KEY
-                valueFrom:
-                  secretKeyRef:
-                    name: aws-ecr-creds
-                    key: AWS_SECRET_ACCESS_KEY
