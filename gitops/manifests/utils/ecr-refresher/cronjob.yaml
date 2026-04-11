@@ -1,0 +1,59 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ecr-token-refresher
+  namespace: devsecops-app
+spec:
+  schedule: "0 */6 * * *"          # Every 6 hours (safer than 8)
+  successfulJobsHistoryLimit: 5
+  failedJobsHistoryLimit: 5
+  concurrencyPolicy: Forbid        # Prevent overlapping runs
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: ecr-refresher-sa
+          restartPolicy: OnFailure
+          containers:
+          - name: ecr-token-refresher
+            image: bitnami/aws-cli:latest 
+            # image: public.ecr.aws/aws-cli/aws-cli:latest   # Alternative
+            
+            command:
+            - /bin/sh
+            - -c
+            - |
+              set -euo pipefail
+              
+              echo "🔄 Refreshing ECR token..."
+              TOKEN=$(aws ecr get-login-password --region us-east-1)
+              
+              echo "🗑️  Deleting old secret (if exists)..."
+              kubectl delete secret ecr-secret -n devsecops-app --ignore-not-found=true
+              
+              echo "🔑 Creating new docker-registry secret..."
+              kubectl create secret docker-registry ecr-secret \
+                --docker-server=393818036545.dkr.ecr.us-east-1.amazonaws.com \
+                --docker-username=AWS \
+                --docker-password="$TOKEN" \
+                -n devsecops-app
+              
+              echo "✅ ECR token successfully refreshed!"
+            resources:
+              requests:
+                cpu: 100m
+                memory: 128Mi
+              limits:
+                cpu: 300m
+                memory: 256Mi
+            env:
+              - name: AWS_ACCESS_KEY_ID
+                valueFrom:
+                  secretKeyRef:
+                    name: aws-ecr-creds
+                    key: AWS_ACCESS_KEY_ID
+              - name: AWS_SECRET_ACCESS_KEY
+                valueFrom:
+                  secretKeyRef:
+                    name: aws-ecr-creds
+                    key: AWS_SECRET_ACCESS_KEY

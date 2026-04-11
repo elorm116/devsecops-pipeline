@@ -403,6 +403,22 @@ FileNotFoundError: [Errno 2] No usable temporary directory found in
 
 ---
 
+### 6. ECR Token Expiry & Secret Name Mismatch
+
+**Symptom:** Pods stuck in `ImagePullBackOff` despite the image existing in ECR and a secret being present.
+
+**Root cause:** ECR login tokens expire every 12 hours. Additionally, the Deployment manifest was hardcoded to look for `ecr-secret`, while the manual refresh script created `ecr-registry-secret`.
+
+**Fix:** Standardized secret naming to `ecr-secret` and implemented a 12-hour refresh cycle. (Next step: Automated CronJob refresher).
+
+### 7. ArgoCD Controller CRD Desync
+
+**Symptom:** The `argocd-applicationset-controller` stuck in a `CrashLoopBackOff`, preventing GitOps synchronization.
+
+**Root cause:** The controller was attempting to watch `ApplicationSet` resources, but the corresponding CRDs were missing or corrupted in the k3s API server.
+
+**Fix:** Re-applied the official ArgoCD CRD manifests and performed a hard refresh of the Application objects.
+
 ## Known gaps and next steps
 
 | Item | Status | Plan |
