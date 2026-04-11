@@ -63,6 +63,7 @@ alertmanager:
         send_resolved: true
         title: '{{ .GroupLabels.alertname }}'
         text: '{{ .CommonAnnotations.description }}'
+    - name: 'null'
 
   # Your existing Resource Limits + the Secret Mounting
   alertmanagerSpec:
