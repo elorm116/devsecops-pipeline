@@ -16,7 +16,8 @@ spec:
           restartPolicy: OnFailure
           containers:
           - name: ecr-token-refresher
-            image: bitnami/aws-cli:latest 
+            image: public.ecr.aws/aws-cli/aws-cli:2.34.27
+            imagePullPolicy: IfNotPresent
             # image: public.ecr.aws/aws-cli/aws-cli:latest   # Alternative
             
             command:
