@@ -122,22 +122,22 @@ jobs:
 
       # --- GCP ARTIFACT REGISTRY PUSH (WIF) ---
       - name: Authenticate to GCP
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && env.GCP_PROJECT_NUMBER != '' && env.GCP_WORKLOAD_IDENTITY_POOL != '' && env.GCP_SERVICE_ACCOUNT != '' && env.GCP_PROJECT_ID != ''
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: projects/${{ secrets.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ secrets.GCP_WORKLOAD_IDENTITY_POOL }}/providers/github-provider
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          workload_identity_provider: projects/${{ env.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ env.GCP_WORKLOAD_IDENTITY_POOL }}/providers/github-provider
+          service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
 
       - name: Set up gcloud
-        if: github.ref == 'refs/heads/main' && secrets.GCP_PROJECT_NUMBER != '' && secrets.GCP_WORKLOAD_IDENTITY_POOL != '' && secrets.GCP_SERVICE_ACCOUNT != ''
+        if: github.ref == 'refs/heads/main' && env.GCP_PROJECT_NUMBER != '' && env.GCP_WORKLOAD_IDENTITY_POOL != '' && env.GCP_SERVICE_ACCOUNT != '' && env.GCP_PROJECT_ID != ''
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Login to Artifact Registry
-        if: github.ref == 'refs/heads/main' && secrets.GCP_PROJECT_NUMBER != '' && secrets.GCP_WORKLOAD_IDENTITY_POOL != '' && secrets.GCP_SERVICE_ACCOUNT != ''
-        run: gcloud auth configure-docker ${{ secrets.GCP_REGION }}-docker.pkg.dev --quiet
+        if: github.ref == 'refs/heads/main' && env.GCP_PROJECT_NUMBER != '' && env.GCP_WORKLOAD_IDENTITY_POOL != '' && env.GCP_SERVICE_ACCOUNT != '' && env.GCP_PROJECT_ID != ''
+        run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev --quiet
 
       - name: Build and push to GCP
-        if: github.ref == 'refs/heads/main' && secrets.GCP_PROJECT_NUMBER != '' && secrets.GCP_WORKLOAD_IDENTITY_POOL != '' && secrets.GCP_SERVICE_ACCOUNT != '' && secrets.GCP_PROJECT_ID != ''
+        if: github.ref == 'refs/heads/main' && env.GCP_PROJECT_NUMBER != '' && env.GCP_WORKLOAD_IDENTITY_POOL != '' && env.GCP_SERVICE_ACCOUNT != '' && env.GCP_PROJECT_ID != ''
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -145,9 +145,9 @@ jobs:
           push: true
           provenance: false
           tags: |
-            ${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ secrets.GCP_GAR_REPOSITORY }}/${{ secrets.IMAGE_NAME }}:${{ github.sha }}
-            ${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ secrets.GCP_GAR_REPOSITORY }}/${{ secrets.IMAGE_NAME }}:sha-${{ github.sha }}
-            ${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ secrets.GCP_GAR_REPOSITORY }}/${{ secrets.IMAGE_NAME }}:latest
+            ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GCP_GAR_REPOSITORY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GCP_GAR_REPOSITORY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+            ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GCP_GAR_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -162,7 +162,7 @@ jobs:
       - run: docker load -i /tmp/image.tar
       - uses: aquasecurity/trivy-action@v0.35.0
         with:
-          image-ref: ${{ secrets.IMAGE_NAME }}:${{ github.sha }}
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
           format: sarif
           output: trivy-results.sarif
           severity: HIGH,CRITICAL
