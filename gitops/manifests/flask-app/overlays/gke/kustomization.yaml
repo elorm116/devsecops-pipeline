@@ -16,6 +16,7 @@ patches:
   - path: patch-image.yaml       # pipeline updates this on every build
   - path: patch-replicas.yaml    # GKE can handle more replicas than Pi
   - path: patch-pullsecret.yaml  # remove ECR pull secret — not needed on GKE
+  - path: patch-service.yaml   # GKE needs LoadBalancer service type for external access
 
 labels:
   - pairs:
