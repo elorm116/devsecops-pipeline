@@ -1,0 +1,21 @@
+# gitops/manifests/flask-app/overlays/gke/kustomization.yaml
+#
+# GKE overlay — same base as Pi, different image registry and replica count.
+# GKE pulls from Artifact Registry (GCP-native) not ECR (AWS).
+# No imagePullSecret needed — Workload Identity handles auth automatically.
+#
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: devsecops-app
+
+resources:
+  - ../../base
+
+patches:
+  - path: patch-image.yaml       # pipeline updates this on every build
+  - path: patch-replicas.yaml    # GKE can handle more replicas than Pi
+  - path: patch-pullsecret.yaml  # remove ECR pull secret — not needed on GKE
+
+commonLabels:
+  environment: gke-autopilot

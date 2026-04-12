@@ -1,0 +1,16 @@
+# gitops/manifests/flask-app/overlays/gke/patch-image.yaml
+#
+# Pipeline updates this file after every successful build.
+# Image pulls from GCP Artifact Registry — no cross-cloud auth needed.
+#
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: devsecops-api
+  namespace: devsecops-app
+spec:
+  template:
+    spec:
+      containers:
+        - name: api
+          image: me-west1-docker.pkg.dev/PROJECT_ID/devsecops-pipeline-secure/devsecops-api:latest

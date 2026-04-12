@@ -180,16 +180,23 @@ devsecops-pipeline/
 ├── Dockerfile                         # Multi-stage, non-root, multi-arch
 │
 ├── terraform/
-│   ├── main.tf                        # AWS resources
-│   ├── variables.tf
-│   ├── outputs.tf
-│   ├── backend.tf                     # S3 remote state
-│   └── userdata.sh                    # EC2 bootstrap
-│
-├── terraform-bootstrap/                # Creates the S3 state bucket (one-time)
-│   ├── main.tf
-│   ├── variables.tf
-│   └── outputs.tf
+│   ├── aws/
+│   │   ├── main.tf                    # AWS resources
+│   │   ├── variables.tf
+│   │   ├── outputs.tf
+│   │   ├── backend.tf                 # S3 remote state
+│   │   ├── userdata.sh                # EC2 bootstrap
+│   │   └── terraform-bootstrap/        # (Optional) state-bucket bootstrap module
+│   │       ├── main.tf
+│   │       ├── variables.tf
+│   │       └── outputs.tf
+│   │
+│   └── gke/
+│       ├── main.tf                    # GKE Autopilot (optional)
+│       ├── variables.tf
+│       ├── outputs.tf
+│       ├── backend.tf                 # GCS remote state
+│       └── gke-setup.sh               # Helper script for GCP bootstrap
 │
 ├── gitops/
 │   ├── apps/                          # ArgoCD Application definitions
@@ -198,13 +205,20 @@ devsecops-pipeline/
 │   │   ├── monitoring.yaml            # kube-prometheus-stack via Helm
 │   │   └── ingress.yaml               # Traefik via Helm
 │   │
+│   ├── apps-gke/                       # ArgoCD Applications for GKE (kept separate)
+│   │   └── flask-app.yaml
+│   │
 │   └── manifests/
 │       ├── flask-app/
 │       │   ├── base/
 │       │   └── overlays/
-│       │       └── pi/
+│       │       ├── pi/
+│       │       │   ├── patch-image.yaml   # ← pipeline updates this
+│       │       │   └── patch-replicas.yaml
+│       │       └── gke/
 │       │           ├── patch-image.yaml   # ← pipeline updates this
-│       │           └── patch-replicas.yaml
+│       │           ├── patch-replicas.yaml
+│       │           └── patch-pullsecret.yaml
 │       ├── monitoring/
 │       │   └── values.yaml
 │       └── ingress/
@@ -256,7 +270,7 @@ AWS is intentionally treated as optional: it’s common to `terraform destroy` a
 
 ```bash
 # 1. Create S3 bucket for Terraform state
-#    Must match terraform/backend.tf (default: mali-devsecops-pipeline-tfstate)
+#    Must match terraform/aws/backend.tf (default: mali-devsecops-pipeline-tfstate)
 aws s3api create-bucket \
   --bucket mali-devsecops-pipeline-tfstate \
   --region us-east-1
@@ -272,6 +286,16 @@ aws ec2 create-key-pair \
 
 # 3. Provision everything
 cd terraform
+terraform init
+terraform apply \
+  -var="key_pair_name=devsecops-key" \
+  -var="allowed_ssh_cidr=$(curl -s ifconfig.me)/32"
+```
+
+If you're using the refactored layout, run Terraform from `terraform/aws/` instead:
+
+```bash
+cd terraform/aws
 terraform init
 terraform apply \
   -var="key_pair_name=devsecops-key" \

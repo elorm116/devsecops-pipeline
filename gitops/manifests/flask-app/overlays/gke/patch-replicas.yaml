@@ -1,0 +1,12 @@
+# gitops/manifests/flask-app/overlays/gke/patch-replicas.yaml
+#
+# GKE Autopilot scales nodes automatically — we can run more replicas.
+# Autopilot provisions exactly the resources the pods request.
+#
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: devsecops-api
+  namespace: devsecops-app
+spec:
+  replicas: 2

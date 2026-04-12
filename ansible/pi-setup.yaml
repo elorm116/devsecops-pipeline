@@ -1,5 +1,5 @@
 ---
-- name: Hardening and K3s Prep for Victor Cluster
+- name: Hardening and K3s Prep for Pi Cluster
   hosts: pi_nodes
   become: yes
   # vars: ansible_user removed because it is handled by your inventory.ini (user: mali)

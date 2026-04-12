@@ -1,0 +1,30 @@
+# gitops/apps-gke/flask-app.yaml
+#
+# ArgoCD Application that deploys the Flask app to GKE.
+# IMPORTANT: This must NOT live under gitops/apps/ because the Pi cluster's
+# app-of-apps watches that folder. Keep GKE apps isolated so each cluster's
+# ArgoCD only applies its own Application manifests.
+#
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: flask-app
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/elorm116/devsecops-pipeline.git
+    targetRevision: main
+    path: gitops/manifests/flask-app/overlays/gke
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: devsecops-app
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
