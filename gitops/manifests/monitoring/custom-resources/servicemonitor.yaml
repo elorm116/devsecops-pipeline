@@ -3,7 +3,6 @@ apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: devsecops-api
-  namespace: monitoring
   labels:
     app.kubernetes.io/name: devsecops-api
     release: kube-prometheus    # must match Prometheus helm release label

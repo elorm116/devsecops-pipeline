@@ -3,7 +3,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: devsecops-api
-  namespace: devsecops-app
   labels:
     app.kubernetes.io/name: devsecops-api
     app.kubernetes.io/component: api

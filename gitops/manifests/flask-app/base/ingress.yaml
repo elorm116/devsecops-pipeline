@@ -3,7 +3,6 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: devsecops-api
-  namespace: devsecops-app
   labels:
     app.kubernetes.io/name: devsecops-api
     app.kubernetes.io/managed-by: argocd

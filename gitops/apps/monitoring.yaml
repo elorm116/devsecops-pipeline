@@ -25,7 +25,13 @@ spec:
     # Source 2: our own repo — provides the values file above
     - repoURL: https://github.com/elorm116/devsecops-pipeline.git
       targetRevision: main
-      ref: values               # referenced as $values above
+      ref: values              # referenced as $values above
+
+    # Source 3: Raw manifests (This picks up your ServiceMonitor)
+    - repoURL: https://github.com/elorm116/devsecops-pipeline.git
+      targetRevision: main
+      path: gitops/manifests/monitoring/custom-resources
+
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring
