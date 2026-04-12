@@ -166,10 +166,7 @@ resource "kubernetes_manifest" "root_app" {
       source = {
         repoURL        = "https://github.com/elorm116/devsecops-pipeline.git"
         targetRevision = "main"
-        path           = "gitops/manifests" 
-        directory = {
-          recurse = true
-        }
+        path           = "gitops/apps-gke" 
       }
       destination = {
         server    = "https://kubernetes.default.svc"
