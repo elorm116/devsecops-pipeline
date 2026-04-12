@@ -1,7 +1,5 @@
 ################################################################################
-# terraform/gke/main.tf
-# GKE Autopilot cluster — me-west1 (Tel Aviv)
-# Autopilot: Google manages nodes, you pay per pod not per node
+# Terraform Settings & Providers
 ################################################################################
 
 terraform {
@@ -11,16 +9,41 @@ terraform {
       source  = "hashicorp/google"
       version = "~> 7.27"
     }
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = "~> 3.0"
+    }
+    helm = {
+      source  = "hashicorp/helm"
+      version = "~> 3.1"
+    }
   }
 }
+
+# Dynamic credential retrieval for Helm/Kubernetes
+data "google_client_config" "default" {}
 
 provider "google" {
   project = var.project_id
   region  = var.region
 }
 
+provider "kubernetes" {
+  host                   = "https://${google_container_cluster.primary.endpoint}"
+  token                  = data.google_client_config.default.access_token
+  cluster_ca_certificate = base64decode(google_container_cluster.primary.master_auth[0].cluster_ca_certificate)
+}
+
+provider "helm" {
+  kubernetes = {
+    host                   = "https://${google_container_cluster.primary.endpoint}"
+    token                  = data.google_client_config.default.access_token
+    cluster_ca_certificate = base64decode(google_container_cluster.primary.master_auth[0].cluster_ca_certificate)
+  }
+}
+
 ################################################################################
-# VPC — dedicated network for the cluster
+# VPC — Dedicated network for the cluster
 ################################################################################
 
 resource "google_compute_network" "gke_vpc" {
@@ -34,7 +57,6 @@ resource "google_compute_subnetwork" "gke_subnet" {
   region        = var.region
   network       = google_compute_network.gke_vpc.id
 
-  # Secondary ranges required by GKE for pods and services
   secondary_ip_range {
     range_name    = "pods"
     ip_cidr_range = "10.20.0.0/16"
@@ -47,14 +69,13 @@ resource "google_compute_subnetwork" "gke_subnet" {
 }
 
 ################################################################################
-# GKE Autopilot cluster
+# GKE Autopilot Cluster
 ################################################################################
 
 resource "google_container_cluster" "primary" {
   name     = var.cluster_name
   location = var.region
 
-  # Autopilot — Google manages node pools, scaling, patching
   enable_autopilot = true
 
   network    = google_compute_network.gke_vpc.id
@@ -65,30 +86,25 @@ resource "google_container_cluster" "primary" {
     services_secondary_range_name = "services"
   }
 
-  # Keep the cluster private — nodes have no public IPs
   private_cluster_config {
     enable_private_nodes    = true
-    enable_private_endpoint = false   # keep public endpoint for kubectl access
+    enable_private_endpoint = false # Keep public endpoint for Terraform/kubectl access
     master_ipv4_cidr_block  = "172.16.0.0/28"
   }
 
-  # Release channel — REGULAR gets stable updates ~every few months
   release_channel {
     channel = "REGULAR"
   }
 
-  # Workload identity — lets k8s service accounts act as GCP service accounts
-  # Best practice for accessing GCP services from pods without static keys
   workload_identity_config {
     workload_pool = "${var.project_id}.svc.id.goog"
   }
 
-  deletion_protection = false   # allow terraform destroy for learning
+  deletion_protection = false
 }
 
 ################################################################################
-# Artifact Registry — GCP's ECR equivalent
-# We'll push a copy of the image here so GKE doesn't need ECR cross-cloud auth
+# Artifact Registry
 ################################################################################
 
 resource "google_artifact_registry_repository" "app" {
@@ -99,7 +115,7 @@ resource "google_artifact_registry_repository" "app" {
 }
 
 ################################################################################
-# Cloud NAT — Allows private nodes to access the internet (to pull images)
+# Cloud NAT — Allows private nodes to pull images from internet
 ################################################################################
 
 resource "google_compute_router" "router" {
@@ -114,9 +130,60 @@ resource "google_compute_router_nat" "nat" {
   region                             = var.region
   nat_ip_allocate_option             = "AUTO_ONLY"
   source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
+}
 
-  log_config {
-    enable = true
-    filter = "ERRORS_ONLY"
+################################################################################
+# ArgoCD Bootstrap — The GitOps Butler
+################################################################################
+
+resource "helm_release" "argocd" {
+  name             = "argocd"
+  repository       = "https://argoproj.github.io/argo-helm"
+  chart            = "argo-cd"
+  namespace        = "argocd"
+  create_namespace = true
+  version          = "7.5.0"
+
+  # Crucial: Helm can't install until the API server is up
+  depends_on = [google_container_cluster.primary]
+}
+
+################################################################################
+# Root Application — Connects ArgoCD to your Git Repo
+################################################################################
+
+resource "kubernetes_manifest" "root_app" {
+  manifest = {
+    apiVersion = "argoproj.io/v1alpha1"
+    kind       = "Application"
+    metadata = {
+      name      = "root-app"
+      namespace = "argocd"
+      finalizers = ["resources-finalizer.argocd.argoproj.io"]
+    }
+    spec = {
+      project = "default"
+      source = {
+        repoURL        = "https://github.com/elorm116/devsecops-pipeline.git"
+        targetRevision = "main"
+        path           = "gitops/manifests" 
+        directory = {
+          recurse = true
+        }
+      }
+      destination = {
+        server    = "https://kubernetes.default.svc"
+        namespace = "argocd" # Deploys your apps into their defined namespaces
+      }
+      syncPolicy = {
+        automated = {
+          prune    = true
+          selfHeal = true
+        }
+      }
+    }
   }
+
+  # Ensure the App-of-Apps is created only after ArgoCD is live
+  depends_on = [helm_release.argocd]
 }
