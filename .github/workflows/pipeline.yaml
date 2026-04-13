@@ -85,6 +85,10 @@ jobs:
           cache-to: type=gha,mode=max
           outputs: type=docker,dest=/tmp/image.tar
 
+      - name: Load image into Docker daemon
+        run: |
+          docker load -i /tmp/image.tar
+
       - name: Upload Docker artifact
         uses: actions/upload-artifact@v4
         with:
