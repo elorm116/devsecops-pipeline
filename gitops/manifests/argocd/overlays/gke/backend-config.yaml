@@ -1,0 +1,9 @@
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: argocd-server-backend-config
+spec:
+  healthCheck:
+    type: HTTP
+    requestPath: /healthz
+    port: 8080

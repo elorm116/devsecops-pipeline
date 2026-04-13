@@ -1,0 +1,18 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd-networking
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/elorm116/devsecops-pipeline.git
+    targetRevision: main
+    path: gitops/manifests/argocd/overlays/gke # The folder we just created
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
