@@ -1,7 +1,9 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+
 resources:
   - ../../base
+
 patches:
   - target:
       kind: Ingress
@@ -10,3 +12,10 @@ patches:
       - op: add
         path: /spec/ingressClassName
         value: traefik
+      # These annotations tell Traefik: "Hey, listen for web traffic!"
+      - op: add
+        path: /metadata/annotations/traefik.ingress.kubernetes.io~1router.entrypoints
+        value: web
+      - op: add
+        path: /metadata/annotations/traefik.ingress.kubernetes.io~1router.tls
+        value: "false"

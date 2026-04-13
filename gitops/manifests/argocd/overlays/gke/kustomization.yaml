@@ -13,7 +13,6 @@ patches:
       - op: replace
         path: /spec/ingressClassName
         value: gce
-      # ADD THIS: GKE often needs the legacy annotation to trigger the controller
       - op: add
         path: /metadata/annotations/kubernetes.io~1ingress.class
         value: "gce"
@@ -24,3 +23,13 @@ patches:
       - op: add
         path: /metadata/annotations/cloud.google.com~1backend-config
         value: '{"default": "argocd-server-backend-config"}'
+
+  # THE 502 KILLER: Add this patch below
+  - target:
+      kind: Deployment
+      name: argocd-server
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: "--insecure"
+        

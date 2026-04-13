@@ -15,7 +15,7 @@ spec:
   source:
     repoURL: https://github.com/elorm116/devsecops-pipeline.git
     targetRevision: main
-    path: gitops/apps-shared
+    path: gitops/manifests/argocd/overlays/pi
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
