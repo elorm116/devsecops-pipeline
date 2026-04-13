@@ -12,7 +12,10 @@ patches:
       - op: add
         path: /spec/ingressClassName
         value: traefik
-      # These annotations tell Traefik: "Hey, listen for web traffic!"
+      # Change the host to the Pi-specific subdomain
+      - op: replace
+        path: /spec/rules/0/host
+        value: pi-argo.learndevops.site
       - op: add
         path: /metadata/annotations/traefik.ingress.kubernetes.io~1router.entrypoints
         value: web
