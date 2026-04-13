@@ -2,10 +2,18 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
-  - ../../base 
+  - ../../base
   - backend-config.yaml
 
+# This section "upgrades" the base Ingress for Google Cloud
 patches:
+  - target:
+      kind: Ingress
+      name: argocd-server-ingress
+    patch: |-
+      - op: replace
+        path: /spec/ingressClassName
+        value: gce
   - target:
       kind: Service
       name: argocd-server

@@ -9,7 +9,6 @@ metadata:
     # since Cloudflare handles the SSL at the edge.
     traefik.ingress.kubernetes.io/router.tls: "false"
 spec:
-  ingressClassName: traefik
   rules:
   - host: argo.learndevops.site
     http:
