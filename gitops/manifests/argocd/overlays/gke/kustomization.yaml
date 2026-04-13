@@ -17,6 +17,13 @@ patches:
       - op: add
         path: /metadata/annotations/kubernetes.io~1ingress.class
         value: "gce"
+      # FIX: Move these here to the Ingress target
+      - op: replace
+        path: /spec/rules/0/host
+        value: argo.learndevops.site
+      - op: replace
+        path: /spec/rules/0/http/paths/0/backend/service/port/number
+        value: 80
   - target:
       kind: Service
       name: argocd-server
@@ -28,7 +35,6 @@ patches:
         path: /metadata/annotations/networking.gke.io~1managed-certificates
         value: "argocd-server-cert"
 
-  # THE 502 KILLER: Add this patch below
   - target:
       kind: Deployment
       name: argocd-server
@@ -36,3 +42,4 @@ patches:
       - op: add
         path: /spec/template/spec/containers/0/args/-
         value: "--insecure"
+        
