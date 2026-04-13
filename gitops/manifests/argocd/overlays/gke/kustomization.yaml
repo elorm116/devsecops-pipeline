@@ -24,6 +24,9 @@ patches:
       - op: add
         path: /metadata/annotations/cloud.google.com~1backend-config
         value: '{"default": "argocd-server-backend-config"}'
+      - op: add
+        path: /metadata/annotations/networking.gke.io~1managed-certificates
+        value: "argocd-server-cert"
 
   # THE 502 KILLER: Add this patch below
   - target:
