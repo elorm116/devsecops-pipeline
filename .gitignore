@@ -36,3 +36,6 @@ terraform.rc
 # Ignore env files
 .env
 *.env
+
+
+SCRT/
