@@ -3,11 +3,6 @@ kind: Ingress
 metadata:
   name: argocd-server-ingress
   namespace: argocd
-  annotations:
-    traefik.ingress.kubernetes.io/router.entrypoints: web
-    # Important: Tell Traefik not to try and use HTTPS internally 
-    # since Cloudflare handles the SSL at the edge.
-    traefik.ingress.kubernetes.io/router.tls: "false"
 spec:
   rules:
   - host: argo.learndevops.site
