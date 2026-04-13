@@ -9,16 +9,26 @@ patches:
       kind: Ingress
       name: argocd-server-ingress
     patch: |-
-      - op: add
+      - op: replace
         path: /spec/ingressClassName
         value: traefik
-      # Change the host to the Pi-specific subdomain
       - op: replace
         path: /spec/rules/0/host
         value: pi-argo.learndevops.site
+      - op: replace
+        path: /spec/rules/0/http/paths/0/backend/service/port/number
+        value: 80
       - op: add
         path: /metadata/annotations/traefik.ingress.kubernetes.io~1router.entrypoints
         value: web
       - op: add
         path: /metadata/annotations/traefik.ingress.kubernetes.io~1router.tls
         value: "false"
+
+  - target:
+      kind: Deployment
+      name: argocd-server
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: "--insecure"
