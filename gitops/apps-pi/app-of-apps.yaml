@@ -1,4 +1,4 @@
-# gitops/apps/app-of-apps.yaml
+# gitops/apps-pi/app-of-apps.yaml
 #
 # The "App of Apps" pattern — one root ArgoCD Application that manages
 # all other Applications. You apply this ONE file manually, once.
@@ -17,7 +17,7 @@ spec:
   source:
     repoURL: https://github.com/elorm116/devsecops-pipeline.git
     targetRevision: main
-    path: gitops/apps          # ArgoCD watches this folder for Application manifests
+    path: gitops/apps-pi       # ArgoCD watches this folder for Application manifests
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd

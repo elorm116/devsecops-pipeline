@@ -1,0 +1,52 @@
+# gitops/manifests/kyverno/values.yaml
+#
+# Kyverno Helm values tuned for both clusters.
+# Pi: lightweight, single replica
+# GKE Autopilot: Autopilot manages scaling automatically
+#
+
+admissionController:
+  replicas: 1                  # 1 is fine for single-node Pi and learning
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 100m
+    limits:
+      memory: 384Mi
+      cpu: 500m
+
+backgroundController:
+  resources:
+    requests:
+      memory: 64Mi
+      cpu: 50m
+    limits:
+      memory: 128Mi
+      cpu: 200m
+
+cleanupController:
+  resources:
+    requests:
+      memory: 64Mi
+      cpu: 50m
+    limits:
+      memory: 128Mi
+      cpu: 200m
+
+reportsController:
+  resources:
+    requests:
+      memory: 64Mi
+      cpu: 50m
+    limits:
+      memory: 128Mi
+      cpu: 200m
+
+# Webhook failure policy — Fail means if Kyverno is down, ALL admission
+# requests are blocked. Ignore means Kyverno being down = no enforcement.
+# For a learning project we use Ignore so a Kyverno restart doesn't
+# lock you out. In production this would be Fail.
+webhookFailurePolicy: Ignore
+
+# Generate policy reports so you can see violations in kubectl
+generateSuccessEvents: false    # reduce noise — only report failures

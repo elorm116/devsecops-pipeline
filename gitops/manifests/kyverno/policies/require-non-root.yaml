@@ -1,0 +1,48 @@
+# gitops/manifests/kyverno/policies/require-non-root.yaml
+#
+# Enforces: runAsNonRoot: true on every container.
+# Your deployment already sets this — this policy ensures nothing
+# can bypass it, even if someone edits the manifest directly.
+#
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-non-root
+  annotations:
+    policies.kyverno.io/title: Require Non-Root Containers
+    policies.kyverno.io/category: Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >
+      Containers must not run as root. Running as root gives an attacker
+      full control of the container if a vulnerability is exploited.
+      All containers must set runAsNonRoot: true or runAsUser > 0.
+spec:
+  validationFailureAction: Enforce    # hard block — no exceptions
+  background: true                    # also scan existing resources
+  rules:
+    - name: check-containers-non-root
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - devsecops-app      # only enforce in our app namespace
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kyverno
+                - argocd
+                - monitoring
+                - traefik
+      validate:
+        message: >
+          Containers must not run as root.
+          Set securityContext.runAsNonRoot: true or securityContext.runAsUser > 0.
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  runAsNonRoot: "true"

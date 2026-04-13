@@ -1,0 +1,48 @@
+# gitops/manifests/kyverno/policies/require-readonly-fs.yaml
+#
+# Enforces: readOnlyRootFilesystem: true on every container.
+# Prevents malware or exploits from writing to the container filesystem.
+# Your deployment already sets this — Kyverno makes it non-negotiable.
+#
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-readonly-filesystem
+  annotations:
+    policies.kyverno.io/title: Require Read-Only Root Filesystem
+    policies.kyverno.io/category: Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >
+      Containers must use a read-only root filesystem to prevent
+      attackers from writing malicious files to the container.
+      Use emptyDir volumes for any writable paths the app needs.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: check-readonly-filesystem
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - devsecops-app
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kyverno
+                - argocd
+                - monitoring
+                - traefik
+      validate:
+        message: >
+          Containers must set securityContext.readOnlyRootFilesystem: true.
+          Mount an emptyDir volume for any paths that need to be writable.
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  readOnlyRootFilesystem: true

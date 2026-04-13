@@ -1,0 +1,70 @@
+# gitops/manifests/kyverno/policies/disallow-privileged.yaml
+#
+# Enforces: no privileged containers and no privilege escalation.
+# A privileged container has root-level access to the host node —
+# effectively a full node compromise if exploited.
+# Your deployment drops ALL capabilities — this policy enforces it
+# cluster-wide so no manifest can accidentally re-enable privilege.
+#
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-privileged-containers
+  annotations:
+    policies.kyverno.io/title: Disallow Privileged Containers
+    policies.kyverno.io/category: Security
+    policies.kyverno.io/severity: critical
+    policies.kyverno.io/description: >
+      Privileged containers have unrestricted access to the host node.
+      No container may run with privileged: true or
+      allowPrivilegeEscalation: true.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: check-not-privileged
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - devsecops-app
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kyverno
+                - argocd
+                - monitoring
+                - traefik
+      validate:
+        message: >
+          Privileged containers are not allowed.
+          Remove privileged: true and set allowPrivilegeEscalation: false.
+        pattern:
+          spec:
+            containers:
+              - =(securityContext):
+                  =(privileged): false
+                  allowPrivilegeEscalation: false
+
+    - name: check-no-capability-sys-admin
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - devsecops-app
+      validate:
+        message: >
+          Adding SYS_ADMIN or NET_ADMIN capabilities is not allowed.
+          Containers should drop ALL capabilities.
+        pattern:
+          spec:
+            containers:
+              - =(securityContext):
+                  =(capabilities):
+                    =(add): "!SYS_ADMIN & !NET_ADMIN"

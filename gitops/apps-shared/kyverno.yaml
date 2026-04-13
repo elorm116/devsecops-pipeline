@@ -1,0 +1,42 @@
+# gitops/apps/kyverno.yaml
+#
+# ArgoCD manages Kyverno via Helm.
+# Apply this to BOTH clusters:
+#   - Pi:  kubectl apply -f gitops/apps/kyverno.yaml (with pi kubeconfig)
+#   - GKE: kubectl apply -f gitops/apps/kyverno.yaml (with gke kubeconfig)
+#
+# Each ArgoCD instance applies it to its own cluster.
+#
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kyverno
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    # Source 1: Kyverno Helm chart
+    - repoURL: https://kyverno.github.io/kyverno
+      chart: kyverno
+      targetRevision: "3.*"
+      helm:
+        releaseName: kyverno
+        valueFiles:
+          - $values/gitops/manifests/kyverno/values.yaml
+    # Source 2: our repo provides the values file
+    - repoURL: https://github.com/elorm116/devsecops-pipeline.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kyverno
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true   # required — Kyverno CRDs are large
+      - Replace=true           # required for Kyverno webhook configs

@@ -1,0 +1,27 @@
+# gitops/apps-pi/shared-apps.yaml
+#
+# Nested App-of-Apps: lets the Pi root app-of-apps (gitops/apps-pi) also manage
+# the shared applications kept in gitops/apps-shared.
+#
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: shared-apps
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/elorm116/devsecops-pipeline.git
+    targetRevision: main
+    path: gitops/apps-shared
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

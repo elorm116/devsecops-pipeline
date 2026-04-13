@@ -7,7 +7,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: devsecops-api
-  namespace: devsecops-app
 spec:
   replicas: 2
   selector:

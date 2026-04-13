@@ -57,7 +57,7 @@ jobs:
           exit-code: '1'
           severity: HIGH,CRITICAL
 
-  # ── 2. Build & Push (Multi-Cloud) ───────────────────────────────────────────
+  # ── 2. Build, Push & SBOM ──────────────────────────────────────────────────
   build:
     name: Build & Push Images
     runs-on: ubuntu-latest
@@ -90,6 +90,20 @@ jobs:
         with:
           name: docker-image
           path: /tmp/image.tar
+
+      # --- SBOM GENERATION ---
+      - name: Generate SBOM (Syft)
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: cyclonedx-json
+          output-file: ./app.sbom.json
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-sbom
+          path: ./app.sbom.json
 
       # --- AWS ECR PUSH ---
       - name: Configure AWS credentials
@@ -204,9 +218,9 @@ jobs:
         if: always()
         run: docker rm -f staging-app || true
 
-  # ── 4. GitOps Deployments ───────────────────────────────────────────────────
-  deploy-pi:
-    name: Deploy to Pi (GitOps)
+  # ── 4. Unified GitOps Deployment ────────────────────────────────────────────
+  deploy:
+    name: Sync GitOps Manifests
     runs-on: ubuntu-latest
     needs: [dast]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push' && !contains(github.event.head_commit.message, '[skip ci]')
@@ -216,50 +230,27 @@ jobs:
           token: ${{ secrets.GITOPS_PAT }}
           ref: main
           fetch-depth: 0
-      - name: Update Pi Tag
-        run: |
-          git pull --rebase origin main
-          PATCH=gitops/manifests/flask-app/overlays/pi/patch-image.yaml
-          ECR_URL="393818036545.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}"
-          sed -i -E "s|^([[:space:]]*)image:.*|\1image: $ECR_URL:sha-${{ github.sha }}|" "$PATCH"
-          git config user.name "github-actions[bot]"
-          git config user.email "actions@github.com"
-          git add "$PATCH"
-          git commit -m "chore(gitops): deploy sha-${{ github.sha }} to pi [skip ci]" || exit 0
-          for i in 1 2 3; do
-            if git push origin main; then
-              exit 0
-            fi
-            echo "git push failed; rebasing and retrying ($i/3)..."
-            git pull --rebase origin main
-          done
-          exit 1
 
-  deploy-gke:
-    name: Deploy to GKE (GitOps)
-    runs-on: ubuntu-latest
-    needs: [deploy-pi]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && !contains(github.event.head_commit.message, '[skip ci]')
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITOPS_PAT }}
-          ref: main
-          fetch-depth: 0
-      - name: Update GKE Tag
+      - name: Update Both Overlays
         run: |
-          if [[ -z "${{ secrets.GCP_PROJECT_ID }}" ]]; then
-            echo "GCP_PROJECT_ID secret not set; skipping GKE GitOps deploy."
-            exit 0
-          fi
           git pull --rebase origin main
-          PATCH=gitops/manifests/flask-app/overlays/gke/patch-image.yaml
+          
+          # Update Pi (AWS ECR)
+          PATCH_PI=gitops/manifests/flask-app/overlays/pi/patch-image.yaml
+          ECR_URL="393818036545.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}"
+          sed -i -E "s|^([[:space:]]*)image:.*|\1image: $ECR_URL:sha-${{ github.sha }}|" "$PATCH_PI"
+          
+          # Update GKE (GCP GAR)
+          PATCH_GKE=gitops/manifests/flask-app/overlays/gke/patch-image.yaml
           GAR_URL="${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.GCP_GAR_REPOSITORY }}/${{ env.IMAGE_NAME }}"
-          sed -i -E "s|^([[:space:]]*)image:.*|\1image: $GAR_URL:sha-${{ github.sha }}|" "$PATCH"
+          sed -i -E "s|^([[:space:]]*)image:.*|\1image: $GAR_URL:sha-${{ github.sha }}|" "$PATCH_GKE"
+          
           git config user.name "github-actions[bot]"
           git config user.email "actions@github.com"
-          git add "$PATCH"
-          git commit -m "chore(gitops): deploy sha-${{ github.sha }} to gke [skip ci]" || exit 0
+          git add "$PATCH_PI" "$PATCH_GKE"
+          
+          git commit -m "chore(gitops): deploy sha-${{ github.sha }} to all clusters [skip ci]" || exit 0
+          
           for i in 1 2 3; do
             if git push origin main; then
               exit 0
@@ -268,3 +259,4 @@ jobs:
             git pull --rebase origin main
           done
           exit 1
+      

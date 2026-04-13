@@ -1,0 +1,53 @@
+# gitops/manifests/kyverno/policies/require-resource-limits.yaml
+#
+# Enforces: every container must declare CPU and memory limits.
+# Without limits, a single misbehaving container can starve the
+# entire node — especially dangerous on a single-node Pi cluster.
+#
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-resource-limits
+  annotations:
+    policies.kyverno.io/title: Require Resource Limits
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/description: >
+      All containers must declare CPU and memory limits to prevent
+      resource exhaustion on the node. This is critical on single-node
+      clusters like the Raspberry Pi homelab.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: check-resource-limits
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - devsecops-app
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kyverno
+                - argocd
+                - monitoring
+                - traefik
+      validate:
+        message: >
+          All containers must specify resources.limits.cpu
+          and resources.limits.memory.
+        pattern:
+          spec:
+            containers:
+              - resources:
+                  limits:
+                    memory: "?*"
+                    cpu: "?*"
+                  requests:
+                    memory: "?*"
+                    cpu: "?*"
