@@ -2,7 +2,7 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
-  - ../../ingress.yaml # Points to your existing base ingress
+  - ../../base 
   - backend-config.yaml
 
 patches:
