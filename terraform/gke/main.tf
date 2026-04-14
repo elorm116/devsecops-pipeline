@@ -130,6 +130,11 @@ resource "google_compute_router_nat" "nat" {
   region                             = var.region
   nat_ip_allocate_option             = "AUTO_ONLY"
   source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
+
+  log_config {
+    enable = true
+    filter = "ERRORS_ONLY"
+  }
 }
 
 ################################################################################
@@ -144,8 +149,17 @@ resource "helm_release" "argocd" {
   create_namespace = true
   version          = "7.5.0"
 
+  timeout          = 300    # 15 minutes
+  wait             = false  # Don't block Terraform if the pods aren't 100% ready
+  cleanup_on_fail  = true
+  force_update     = true              # Overwrite any existing state
+
   # Crucial: Helm can't install until the API server is up
-  depends_on = [google_container_cluster.primary]
+  depends_on = [
+    google_container_cluster.primary,
+    google_compute_router_nat.nat
+    ]
+  
 }
 
 ################################################################################
