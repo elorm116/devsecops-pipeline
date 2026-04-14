@@ -1,0 +1,17 @@
+apiVersion: kyverno.io/v2beta1
+kind: ClusterCleanupPolicy
+metadata:
+  name: cleanup-reports
+spec:
+  match:
+    any:
+    - resources:
+        kinds:
+        - PolicyReport
+        - ClusterPolicyReport
+  schedule: "0 0 * * *" # Runs daily at midnight
+  conditions:
+    any:
+    - key: "{{ request.object.metadata.creationTimestamp }}"
+      operator: DurationGreaterThan
+      value: 24h
