@@ -4,7 +4,7 @@ metadata:
   name: traefik-monitor
   namespace: monitoring
   labels:
-    release: kube-prometheus # Corrected to match your cluster release
+    release: kube-prometheus
 spec:
   selector:
     matchLabels:
@@ -13,5 +13,6 @@ spec:
     matchNames:
       - kube-system
   endpoints:
-  - port: metrics
+  - targetPort: 9100 # Using the number directly avoids the "Name" mismatch
+    path: /metrics
     interval: 30s
