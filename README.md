@@ -11,18 +11,17 @@
 
 A production-grade DevSecOps platform built and debugged from scratch across two live environments — AWS cloud and a self-hosted Kubernetes cluster running on a Raspberry Pi 5. Security is automated at every stage of the delivery lifecycle. Infrastructure is code. Deployments are Git commits. The cluster manages itself.
 
-Everything in this repo was built, broken, and fixed in real conditions. The troubleshooting ledger at the bottom documents five production issues encountered and resolved during the build — not hypothetical, not from a tutorial.
+Everything in this repo was built, broken, and fixed in real conditions. The troubleshooting ledger at the bottom documents eight production issues encountered and resolved during the build — not hypothetical, not from a tutorial.
 
 ---
 
 ## Live endpoints
 
-| Environment | URL | Notes |
-|---|---|---|
-| AWS (Application Load Balancer) | `terraform output -raw alb_url` | Provisioned by Terraform (often destroyed to avoid cost) |
-| Pi homelab (Cloudflare Tunnel) | `https://web.learndevops.site` | k3s on Raspberry Pi 5, zero open ports |
-| Health check | `/health` | Used by Kubernetes liveness/readiness probes |
-| Prometheus metrics | `/metrics` | Scraped by Prometheus |
+| Environment | URL | Status | Notes |
+|---|---|---|---|
+| Pi homelab | `https://web.learndevops.site` | Stable | k3s on Raspberry Pi 5 (Cloudflare Tunnel, zero open ports) |
+| AWS cloud | `terraform output -raw alb_url` | On-Demand | Provisioned via Terraform for validation (often destroyed to avoid cost) |
+| GKE cluster | N/A | Archived | Decoupled to optimize costs |
 
 ---
 
@@ -345,7 +344,7 @@ kubectl -n argocd get applications -w
 
 ## Troubleshooting ledger
 
-Five real issues encountered and resolved during the build.
+Eight real issues encountered and resolved during the build.
 
 ### 1. Exec format error — architecture mismatch
 
@@ -439,6 +438,25 @@ FileNotFoundError: [Errno 2] No usable temporary directory found in
 **Root cause:** The controller was attempting to watch `ApplicationSet` resources, but the corresponding CRDs were missing or corrupted in the k3s API server.
 
 **Fix:** Re-applied the official ArgoCD CRD manifests and performed a hard refresh of the Application objects.
+
+---
+
+### 8. Helm Schema Type Mismatch — expose field
+
+**Symptom:** ArgoCD sync failing with:
+
+```
+cannot overwrite table with non table
+```
+
+**Root cause:** Newer Traefik Helm charts (v26+) changed the `expose` key from a boolean (`true`) to an object (`default: true`). The chart's strict schema validation prevented manifest generation.
+
+**Fix:** Updated `gitops/manifests/ingress/values.yaml` to use the object structure:
+
+```yaml
+expose:
+  default: true
+```
 
 ## Known gaps and next steps
 
