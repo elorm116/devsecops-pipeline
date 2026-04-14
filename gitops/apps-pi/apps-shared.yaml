@@ -1,12 +1,12 @@
-# gitops/apps-pi/shared-apps.yaml
+# gitops/apps-pi/apps-shared.yaml
 #
-# ArgoCD networking for the Pi cluster (Ingress + server flags).
-# This is intentionally separate from the shared applications in gitops/apps-shared/.
+# Nested App-of-Apps: installs the shared ArgoCD Applications (ingress,
+# monitoring, Kyverno, policies) that live under gitops/apps-shared/.
 #
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: shared-apps
+  name: apps-shared
   namespace: argocd
   finalizers:
     - resources-finalizer.argocd.argoproj.io
@@ -15,7 +15,7 @@ spec:
   source:
     repoURL: https://github.com/elorm116/devsecops-pipeline.git
     targetRevision: main
-    path: gitops/manifests/argocd/overlays/pi
+    path: gitops/apps-shared
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd

@@ -1,4 +1,4 @@
-# gitops/apps/flask-app.yaml
+# gitops/apps-pi/flask-app.yaml
 #
 # ArgoCD Application for the Flask API.
 # Points at overlays/pi/ — Kustomize renders base + patch and applies.

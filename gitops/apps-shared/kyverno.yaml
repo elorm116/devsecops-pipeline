@@ -1,9 +1,9 @@
 # gitops/apps-shared/kyverno.yaml
 #
 # ArgoCD manages Kyverno via Helm.
-# Apply this to BOTH clusters:
-#   - Pi:  kubectl apply -f gitops/apps/kyverno.yaml (with pi kubeconfig)
-#   - GKE: kubectl apply -f gitops/apps/kyverno.yaml (with gke kubeconfig)
+# Apply this to any cluster that runs ArgoCD:
+#   - Pi:  kubectl apply -f gitops/apps-shared/kyverno.yaml (with pi kubeconfig)
+#   - GKE: kubectl apply -f gitops/apps-shared/kyverno.yaml (with gke kubeconfig)
 #
 # Each ArgoCD instance applies it to its own cluster.
 #

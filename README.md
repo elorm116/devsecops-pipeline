@@ -126,7 +126,7 @@ All five gates run on every push to `main` and on every pull request.
 
 **Kustomize over plain YAML or Helm** — Kustomize is built into `kubectl` and ArgoCD natively. The base/overlay pattern keeps a single canonical set of manifests and applies environment-specific patches on top. The pipeline only ever touches one file — `overlays/pi/patch-image.yaml`.
 
-**App of Apps pattern** — one root ArgoCD Application manages all others from `gitops/apps/`. Applied once by hand. After that, ArgoCD manages itself and the entire cluster from Git.
+**App of Apps pattern** — the Pi cluster uses one root ArgoCD Application that manages all others from `gitops/apps-pi/`. Shared apps (ingress/monitoring/Kyverno) live in `gitops/apps-shared/` and are pulled in via a nested Application.
 
 **Multi-source Helm in ArgoCD** — Prometheus and Traefik are installed via Helm charts but with values files stored in this repo. ArgoCD's multi-source feature pulls the upstream chart and our values together.
 
@@ -199,14 +199,21 @@ devsecops-pipeline/
 │       └── gke-setup.sh               # Helper script for GCP bootstrap
 │
 ├── gitops/
-│   ├── apps/                          # ArgoCD Application definitions
-│   │   ├── app-of-apps.yaml           # Root app — manages all others
-│   │   ├── flask-app.yaml             # Points at overlays/pi/
-│   │   ├── monitoring.yaml            # kube-prometheus-stack via Helm
-│   │   └── ingress.yaml               # Traefik via Helm
+│   ├── apps-pi/                       # ArgoCD Applications for the Pi cluster
+│   │   ├── app-of-apps.yaml           # Root app — manages the Pi cluster
+│   │   ├── flask-app.yaml             # Deploys overlays/pi/
+│   │   ├── apps-shared.yaml           # Nested app-of-apps → gitops/apps-shared/
+│   │   └── shared-apps.yaml           # ArgoCD networking overlay (Pi)
 │   │
-│   ├── apps-gke/                       # ArgoCD Applications for GKE (kept separate)
-│   │   └── flask-app.yaml
+│   ├── apps-shared/                   # Shared ArgoCD Applications (ingress/monitoring/Kyverno)
+│   │   ├── ingress.yaml               # Traefik via Helm
+│   │   ├── monitoring.yaml            # kube-prometheus-stack via Helm (+ custom resources)
+│   │   ├── kyverno.yaml               # Kyverno via Helm
+│   │   └── kyverno-policies.yaml      # Policies applied after Kyverno
+│   │
+│   ├── apps-gke/                      # ArgoCD Applications for GKE (kept separate)
+│   │   ├── flask-app.yaml
+│   │   └── argocd-networking.yaml
 │   │
 │   └── manifests/
 │       ├── flask-app/
@@ -285,16 +292,6 @@ aws ec2 create-key-pair \
   --output text > ~/.ssh/devsecops-key.pem && chmod 400 ~/.ssh/devsecops-key.pem
 
 # 3. Provision everything
-cd terraform
-terraform init
-terraform apply \
-  -var="key_pair_name=devsecops-key" \
-  -var="allowed_ssh_cidr=$(curl -s ifconfig.me)/32"
-```
-
-If you're using the refactored layout, run Terraform from `terraform/aws/` instead:
-
-```bash
 cd terraform/aws
 terraform init
 terraform apply \
@@ -337,8 +334,8 @@ kubectl create secret docker-registry ecr-secret \
   --docker-password=$(aws ecr get-login-password --region us-east-1)
 
 # 4. Apply the root application — this is the only manual kubectl apply
-#    If you fork this repo, update repoURL in gitops/apps/*.yaml first.
-kubectl apply -f gitops/apps/app-of-apps.yaml
+#    If you fork this repo, update repoURL under gitops/apps-*/ first.
+kubectl apply -f gitops/apps-pi/app-of-apps.yaml
 
 # 5. Watch ArgoCD bootstrap the entire cluster from Git
 kubectl -n argocd get applications -w
