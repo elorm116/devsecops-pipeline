@@ -1,4 +1,4 @@
-# gitops/apps/ingress.yaml
+# gitops/apps-shared/ingress.yaml
 #
 # ArgoCD manages Traefik via Helm.
 # Same multi-source pattern as monitoring — chart + our values file.

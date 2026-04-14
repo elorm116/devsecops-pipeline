@@ -1,4 +1,4 @@
-# gitops/apps/kyverno-policies.yaml
+# gitops/apps-shared/kyverno-policies.yaml
 #
 # Separate Application for the policies themselves.
 # Splitting install and policies is best practice — Kyverno CRDs must

@@ -1,4 +1,4 @@
-# gitops/apps/kyverno.yaml
+# gitops/apps-shared/kyverno.yaml
 #
 # ArgoCD manages Kyverno via Helm.
 # Apply this to BOTH clusters:

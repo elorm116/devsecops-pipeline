@@ -1,4 +1,4 @@
-# gitops/apps/monitoring.yaml
+# gitops/apps-shared/monitoring.yaml
 #
 # ArgoCD manages Prometheus + Grafana via Helm.
 # "sources" (plural) lets us combine the Helm chart with a custom

@@ -12,6 +12,10 @@ ports:
     nodePort: 30080
   websecure:
     nodePort: 30443
+  # Merged Metrics port here
+  metrics:
+    port: 9100
+    expose: true
 
 resources:
   requests:
@@ -30,3 +34,9 @@ logs:
 api:
   dashboard: true
   insecure: true
+
+# Metrics — Enable Prometheus exporter
+metrics:
+  prometheus:
+    enabled: true
+    entryPoint: metrics
