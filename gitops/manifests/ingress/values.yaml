@@ -1,6 +1,4 @@
 # Traefik values for Pi homelab.
-# NodePort so Cloudflare Tunnel can reach it without a LoadBalancer.
-
 service:
   type: NodePort
   ports:
@@ -12,15 +10,18 @@ service:
 ports:
   web:
     port: 8000
-    expose: true
+    expose:
+      default: true  # Changed from 'true' to an object
     exposedPort: 80
   websecure:
     port: 8443
-    expose: true
+    expose:
+      default: true  # Changed from 'true' to an object
     exposedPort: 443
   metrics:
     port: 9100
-    expose: true
+    expose:
+      default: true  # Changed from 'true' to an object
     exposedPort: 9100
 
 resources:
