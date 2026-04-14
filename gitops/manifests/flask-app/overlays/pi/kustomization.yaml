@@ -14,6 +14,7 @@ resources:
 patches:
   - path: patch-image.yaml      # pipeline updates image tag here
   - path: patch-replicas.yaml   # Pi-specific replica count
+  - path: patch-probes.yaml
 
 # Pi-specific labels added to every resource
 commonLabels:

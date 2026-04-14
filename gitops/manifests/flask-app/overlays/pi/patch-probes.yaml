@@ -1,0 +1,15 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: devsecops-api
+spec:
+  template:
+    spec:
+      containers:
+        - name: api
+          startupProbe:
+            timeoutSeconds: 5   # Give the Pi's CPU more time to respond
+          livenessProbe:
+            timeoutSeconds: 5
+          readinessProbe:
+            timeoutSeconds: 5
