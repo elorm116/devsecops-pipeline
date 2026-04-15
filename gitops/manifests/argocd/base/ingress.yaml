@@ -18,7 +18,7 @@ spec:
 
     # gRPC support (very important for ArgoCD CLI)
     - kind: Rule
-      match: Host(`pi-argo.learndevops.site`) && Headers(`Content-Type`, `application/grpc`)
+      match: Host(`pi-argo.learndevops.site`) && Header(`Content-Type`, `application/grpc`)
       services:
         - name: argocd-server
           port: 80
