@@ -133,6 +133,8 @@ All five gates run on every push to `main` and on every pull request.
 
 **Hardened pod security context** — containers run as non-root (UID 1000), with `readOnlyRootFilesystem: true`, `allowPrivilegeEscalation: false`, and all Linux capabilities dropped. A `Memory`-backed `emptyDir` volume is mounted at `/tmp` to give Gunicorn the writable scratch space it needs.
 
+**Admission control with Kyverno** — chosen over OPA/Gatekeeper for its native Kubernetes CRD approach and simpler operational footprint on a resource-constrained Raspberry Pi. Kyverno is installed via Helm with conservative resource requests/limits, policies are scoped to the `devsecops-app` namespace and explicitly exclude system namespaces like `kube-system` and `monitoring`, and PolicyReports are cleaned up on a schedule to reduce storage churn.
+
 **Cloudflare Tunnel over port forwarding** — the Pi has zero open inbound ports. Cloudflare Tunnel creates an outbound-only encrypted connection to Cloudflare's edge network.
 
 ---
