@@ -29,8 +29,7 @@ spec:
                 set -euo pipefail
 
                 echo "🔄 Installing kubectl for ARM64..."
-                curl -LO "https://dl.k8s.io/release/v1.30.0/bin/linux/arm64/kubectl"
-                mv ./kubectl /tmp/kubectl
+                curl -L "https://dl.k8s.io/release/v1.30.0/bin/linux/arm64/kubectl" -o /tmp/kubectl
                 chmod +x /tmp/kubectl
 
                 echo "🔄 Refreshing ECR token..."
