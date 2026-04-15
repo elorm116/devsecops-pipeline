@@ -60,14 +60,15 @@ spec:
           httpGet:
             path: /ready
             port: metrics
-          initialDelaySeconds: 10
-          periodSeconds: 10
+          initialDelaySeconds: 30
+          periodSeconds: 20
         readinessProbe:
           httpGet:
             path: /ready
             port: metrics
-          initialDelaySeconds: 5
-          periodSeconds: 5
+          initialDelaySeconds: 30
+          periodSeconds: 20
+          failureThreshold: 3
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true
