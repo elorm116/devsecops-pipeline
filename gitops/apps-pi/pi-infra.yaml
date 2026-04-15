@@ -6,7 +6,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: shared-apps
+  name: pi-infra
   namespace: argocd
   finalizers:
     - resources-finalizer.argocd.argoproj.io
