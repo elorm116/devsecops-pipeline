@@ -1,3 +1,4 @@
+# gitops/manifests/utils/ecr-refresher/cronjob.yaml
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -22,31 +23,43 @@ spec:
           containers:
           - name: ecr-token-refresher
             image: public.ecr.aws/aws-cli/aws-cli:2.17.0
-            command:
-            - /bin/sh
-            - -c
-            - |
-              set -euo pipefail
+            command: ["/bin/sh", "-c"]
+            args:
+              - |
+                set -euo pipefail
 
-              echo "🔄 Installing kubectl for ARM64..."
-              curl -LO "https://dl.k8s.io/release/v1.30.0/bin/linux/arm64/kubectl"
-              mv ./kubectl /tmp/kubectl
-              chmod +x /tmp/kubectl
+                echo "🔄 Installing kubectl for ARM64..."
+                curl -LO "https://dl.k8s.io/release/v1.30.0/bin/linux/arm64/kubectl"
+                mv ./kubectl /tmp/kubectl
+                chmod +x /tmp/kubectl
 
-              echo "🔄 Refreshing ECR token..."
-              TOKEN=$(aws ecr get-login-password --region us-east-1)
+                echo "🔄 Refreshing ECR token..."
+                TOKEN=$(aws ecr get-login-password --region us-east-1)
 
-              echo "🗑️ Deleting old secret..."
-              /tmp/kubectl delete secret ecr-secret -n devsecops-app --ignore-not-found=true
+                echo "🗑️ Deleting old secret..."
+                /tmp/kubectl delete secret ecr-secret -n devsecops-app --ignore-not-found=true
 
-              echo "🔑 Creating new docker secret..."
-              /tmp/kubectl create secret docker-registry ecr-secret \
-                --docker-server=393818036545.dkr.ecr.us-east-1.amazonaws.com \
-                --docker-username=AWS \
-                --docker-password="$TOKEN" \
-                -n devsecops-app
+                echo "🔑 Creating new docker secret..."
+                /tmp/kubectl create secret docker-registry ecr-secret \
+                  --docker-server=393818036545.dkr.ecr.us-east-1.amazonaws.com \
+                  --docker-username=AWS \
+                  --docker-password="$TOKEN" \
+                  -n devsecops-app
 
-              echo "✅ ECR token refreshed successfully!"
+                echo "✅ ECR token refreshed successfully!"
+            env:
+              - name: AWS_ACCESS_KEY_ID
+                valueFrom:
+                  secretKeyRef:
+                    name: aws-ecr-creds
+                    key: AWS_ACCESS_KEY_ID
+              - name: AWS_SECRET_ACCESS_KEY
+                valueFrom:
+                  secretKeyRef:
+                    name: aws-ecr-creds
+                    key: AWS_SECRET_ACCESS_KEY
+              - name: AWS_DEFAULT_REGION
+                value: us-east-1
             resources:
               requests:
                 cpu: 100m
@@ -57,6 +70,8 @@ spec:
             securityContext:
               allowPrivilegeEscalation: false
               readOnlyRootFilesystem: true
+              runAsNonRoot: true
+              runAsUser: 1000
               capabilities:
                 drop: ["ALL"]
             volumeMounts:
