@@ -1,10 +1,4 @@
 # gitops/manifests/flask-app/overlays/pi/patch-image.yaml
-#
-# THIS FILE IS UPDATED AUTOMATICALLY BY THE GITHUB ACTIONS PIPELINE.
-# On every successful build, the pipeline runs:
-#   sed -i -E "s|^([[:space:]]*)image:.*|\1image: 393818036545.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-secure:sha-${{ github.sha }}|" this file
-# Then commits and pushes. ArgoCD detects the commit and redeploys.
-#
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -28,3 +22,10 @@ spec:
             limits:
               memory: 256Mi
               cpu: 250m
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
