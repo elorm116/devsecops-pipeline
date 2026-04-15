@@ -5,24 +5,35 @@ metadata:
 spec:
   template:
     spec:
+      securityContext:
+        # Satisfies: require-non-root
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 2000
       containers:
         - name: api
-          # Startup: Holds off Liveness/Readiness until the app is fully booted
+          securityContext:
+            # Satisfies: require-readonly-filesystem
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          # Your existing probe config
           startupProbe:
             httpGet:
               path: /health
               port: 5000
-            failureThreshold: 15  # Pi might be slow, give it 15 attempts
-            periodSeconds: 5      # 15 * 5 = 75 seconds total to start
-          # Liveness: Restarts the container if it freezes
+            failureThreshold: 15
+            periodSeconds: 5
           livenessProbe:
             httpGet:
               path: /health
               port: 5000
             timeoutSeconds: 5
-          # Readiness: Tells the Service/Tunnel it's okay to send traffic
           readinessProbe:
             httpGet:
               path: /health
               port: 5000
             timeoutSeconds: 5
+            
