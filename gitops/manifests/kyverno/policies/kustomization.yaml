@@ -7,3 +7,5 @@ resources:
   - require-readonly-fs.yaml
   - require-resource-limits.yaml
   - disallow-privileged.yaml
+  - verify-image-signature.yaml
+  - cleanup-policy.yaml

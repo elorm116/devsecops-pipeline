@@ -1,0 +1,32 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-image-signature
+  annotations:
+    policies.kyverno.io/title: Verify Image Signatures
+    policies.kyverno.io/description: >-
+      This policy verifies that images from ECR and GAR are signed 
+      by Anthony's trusted Cosign key.
+spec:
+  validationFailureAction: Enforce
+  background: false
+  rules:
+    - name: verify-signature
+      match:
+        any:
+        - resources:
+            namespaces:
+            - devsecops-app  # Targeted namespace to avoid locking out system pods
+            kinds:
+            - Pod
+      verifyImages:
+        - imageReferences:
+            - "393818036545.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-secure:*"
+            - "me-west1-docker.pkg.dev/*/devsecops-pipeline-secure/*"
+          attestations:
+            - predicateType: cosign.sigstore.dev/attestation/v1
+          publicKeys: |-
+            -----BEGIN PUBLIC KEY-----
+            MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEOI3OsCbTvpBB5jbMi7hQnwzkr2MT
+            fCJua07ps2P9UvLkJE20QPMkNoZ7tr5R8itACOTUE/bc0LVz3yIc1L6juw==
+            -----END PUBLIC KEY-----
