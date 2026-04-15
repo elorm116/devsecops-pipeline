@@ -13,4 +13,8 @@ data:
         originRequest:
           http2Origin: true
           noTLSVerify: true
+
+      - hostname: web.learndevops.site
+        service: http://devsecops-api.devsecops-app.svc.cluster.local:5000
+
       - service: http_status:404
