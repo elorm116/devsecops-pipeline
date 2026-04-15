@@ -1,0 +1,12 @@
+# gitops/manifests/kyverno/rbac/cleanup-controller-policyreport-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kyverno:cleanup-controller:policyreports
+  labels:
+    # This label triggers automatic aggregation into kyverno:cleanup-controller
+    rbac.kyverno.io/aggregate-to-cleanup-controller: "true"
+rules:
+  - apiGroups: ["wgpolicyk8s.io"]
+    resources: ["policyreports", "clusterpolicyreports"]
+    verbs: ["get", "list", "watch", "delete"]
