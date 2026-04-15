@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: cloudflared
+  namespace: kube-system
+spec:
+  selector:
+    app: cloudflared
+  ports:
+    - name: metrics
+      protocol: TCP
+      port: 2000
+      targetPort: 2000
