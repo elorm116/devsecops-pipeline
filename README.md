@@ -9,7 +9,7 @@
 ![Multi-arch](https://img.shields.io/badge/image-amd64%20%7C%20arm64-blue?logo=docker)
 ![Kustomize](https://img.shields.io/badge/config-Kustomize-FF6C37)
 
-A production-grade DevSecOps platform built and debugged from scratch across two live environments — AWS cloud and a self-hosted Kubernetes cluster running on a Raspberry Pi 5. Security is automated at every stage of the delivery lifecycle. Infrastructure is code. Deployments are Git commits. The cluster manages itself.
+A production-grade DevSecOps platform built and debugged from scratch across cloud and edge environments. It implements a comprehensive CI/CD pipeline for a multi-architecture (`linux/amd64` + `linux/arm64`) Flask API, with security controls enforced across the full software delivery lifecycle. Infrastructure is code. Deployments are Git commits. The cluster manages itself.
 
 Everything in this repo was built, broken, and fixed in real conditions. The troubleshooting ledger at the bottom documents eight production issues encountered and resolved during the build — not hypothetical, not from a tutorial.
 
@@ -52,13 +52,17 @@ Developer pushes to GitHub
 │  [Push image to ECR — tagged sha-<commit>]          │
 │            │                                        │
 │            ▼                                        │
+│  [Cosign signs OCI images (ECR + GAR)]               │
+│            │                                        │
+│            ▼                                        │
 │  [DAST: OWASP ZAP — scans local staging app]        │
 │            │                                        │
 │            ▼                                        │
 │  [Commit new tag to Git]  ◀── GitOps                │
 │            │                                        │
 │            ▼                                        │
-│   ArgoCD detects commit → rolling deploy to Pi      │
+│   ArgoCD syncs → Kyverno admission verifies         │
+│   signatures + pod security → rolling deploy        │
 └─────────────────────────────────────────────────────┘
          │                          │
          ▼                          ▼
@@ -67,8 +71,9 @@ Developer pushes to GitHub
 │  ALB → EC2 (TF) │    │  k3s cluster                 │
 │  Docker         │    │  ├─ flask-app (replicas)     │
 │                 │    │  ├─ ArgoCD                   │
-│  ECR  S3  IAM   │    │  ├─ Prometheus + Grafana     │
-│  CloudWatch     │    │  └─ Traefik ingress          │
+│  ECR  S3  IAM   │    │  ├─ Kyverno admission ctrl   │
+│  CloudWatch     │    │  ├─ Prometheus + Grafana     │
+│                 │    │  └─ cloudflared deployment   │
 └─────────────────┘    │  Cloudflare Tunnel           │
                        │  → web.learndevops.site      │
                        └─────────────────────────────┘
@@ -76,11 +81,11 @@ Developer pushes to GitHub
 
 ### The “Direct” architecture (Pi ingress)
 
-In a standard Kubernetes setup, public traffic typically lands on a cluster “traffic cop” (Traefik / NGINX) first. In this homelab, Cloudflare Tunnel provides the public entrypoint and forwards requests over an outbound-only encrypted tunnel.
+In this homelab, `cloudflared` runs as an in-cluster Deployment and acts as the external entrypoint/routing bridge. Public traffic does not depend on a separate ingress-controller hop in the active path.
 
 - **Cloudflare Edge** receives the request from the internet.
 - **The tunnel** carries the request through a secure “pipe” initiated from inside the Pi network.
-- **Direct handoff**: `cloudflared` acts as both the entrance and the first router — its tunnel config already maps each hostname to a specific internal destination. That destination can be a Kubernetes Service directly, or Traefik’s `web` entrypoint when you want cluster-native host-based routing. This avoids opening inbound ports on the Pi while still allowing clean routing for apps like ArgoCD.
+- **Direct handoff**: tunnel rules map hostnames directly to internal services (for example, `argocd-server.argocd:80` and `devsecops-api.devsecops-app.svc.cluster.local:80`). This keeps the Pi closed to inbound traffic while still exposing managed endpoints.
 
 ### GitOps loop — how the Pi stays in sync
 
@@ -91,6 +96,9 @@ git push (any change)
 Pipeline builds sha-tagged image → pushes to ECR
     │
     ▼
+Pipeline signs images with Cosign (ECR/GAR)
+    │
+    ▼
 Pipeline commits updated image tag to:
 gitops/manifests/flask-app/overlays/pi/patch-image.yaml
     │
@@ -99,6 +107,9 @@ ArgoCD detects the Git commit (polls continuously)
     │
     ▼
 Kustomize renders base/ + overlays/pi/ patches
+    │
+    ▼
+Kyverno admission controller verifies image signatures + policy controls
     │
     ▼
 kubectl apply → zero-downtime rolling deploy
@@ -115,15 +126,54 @@ Every deploy is a Git commit. Every rollback is a git revert.
 
 | Gate | Tool | Failure mode | What it catches |
 |------|------|-------------|----------------|
-| SAST | Bandit | Warn + artifact | Insecure Python — `eval()`, shell injection, hardcoded secrets, weak crypto |
-| Secret scan | Trivy | **Hard fail** | Credentials/API keys/tokens committed to source — blocks pipeline entirely |
-| Container scan | Trivy | Warn + artifact | CVEs in base image layers and installed packages |
-| IaC scan | Checkov | Warn + artifact | Terraform misconfigs — open security groups, unencrypted S3, overpermissive IAM |
-| DAST | OWASP ZAP | Warn + artifact | Runtime vulnerabilities — missing headers, exposed endpoints, XSS, injection points |
+| SAST | Bandit | Warn + artifact | Insecure Python patterns — `eval()`, shell injection, weak crypto, risky coding practices |
+| Secret scan | Trivy (filesystem mode) | **Hard fail** | Credentials, API keys, and tokens committed to source |
+| Container scan (report) | Trivy + SARIF upload | Warn + artifact | CVEs in image layers and installed packages (full report) |
+| Container scan (enforcement) | Trivy (CRITICAL gate) | **Hard fail** | Blocks builds when CRITICAL vulnerabilities are detected |
+| IaC scan | Checkov | Warn + artifact | Terraform misconfigurations — open security groups, encryption gaps, broad IAM |
+| DAST | OWASP ZAP baseline | Warn + artifact | Runtime web issues — missing headers, weak hardening, exposed attack surface |
 
-Secret scanning is the only hard-fail gate. A committed credential stops the pipeline immediately — nothing ships. All other gates produce downloadable scan reports saved as GitHub Actions artifacts.
+Hard-fail gates are secret scanning and CRITICAL container vulnerabilities. Other security stages are configured to keep producing evidence artifacts while still surfacing risks on every run.
 
-All five gates run on every push to `main` and on every pull request.
+All security gates run on every push to `main` and on every pull request.
+
+---
+
+## Implemented security features
+
+### 1. Shift-left security (CI stage)
+
+- **SAST (Bandit):** automated Python static analysis to catch insecure code patterns early in CI.
+- **Secret scanning (Trivy):** repository scan runs as a blocking gate to prevent leaked credentials from entering the delivery path.
+- **SCA and SBOM (Syft):** the pipeline generates and uploads a CycloneDX SBOM (`app.sbom.json`) for dependency transparency and auditability.
+
+### 2. Container integrity and signing
+
+- **Multi-arch builds:** Docker Buildx publishes `linux/amd64` and `linux/arm64` images for cloud and edge runtime compatibility.
+- **Vulnerability enforcement gate:** Trivy performs both report generation (SARIF) and enforcement (`CRITICAL` findings fail the build).
+- **Image signing (Cosign):** OCI images are signed for both Amazon ECR and Google Artifact Registry so runtime policy can verify image provenance.
+
+### 3. Continuous deployment and GitOps
+
+- **Automated manifest updates:** GitHub Actions patches GitOps image tags to `sha-<commit>` in overlay manifests.
+- **ArgoCD orchestration:** pull-based sync continuously reconciles cluster state to Git state.
+- **Traceable rollbacks:** every deploy is a Git commit; rollback is a standard `git revert`.
+
+### 4. Cluster-side enforcement (admission control)
+
+- **Kyverno policy engine:** runtime policy-as-code enforcement in-cluster.
+- **Signature verification:** `verify-image-signature` ClusterPolicy blocks unsigned or untrusted images in `devsecops-app`.
+- **Pod security controls:** policies enforce non-root, read-only root filesystem, disallow privileged settings, and require resource limits/requests.
+- **Automated cleanup:** ClusterCleanupPolicy prunes `PolicyReport` and `ClusterPolicyReport` objects every 24h to reduce etcd/storage churn.
+
+---
+
+## Infrastructure overview
+
+- **Cloud:** AWS (ECR/EC2/ALB via Terraform) and GCP (GAR/GKE path retained for multi-cloud pipeline support).
+- **Edge:** Raspberry Pi 5 running k3s as the primary live cluster.
+- **Ingress and edge access:** Cloudflare Tunnel via in-cluster `cloudflared` Deployment, with direct hostname-to-service routing and zero-open-port external access.
+- **Security toolchain:** Cosign, Kyverno, Trivy, Bandit, Checkov, OWASP ZAP, Syft.
 
 ---
 
@@ -133,15 +183,17 @@ All five gates run on every push to `main` and on every pull request.
 
 **Kustomize over plain YAML or Helm** — Kustomize is built into `kubectl` and ArgoCD natively. The base/overlay pattern keeps a single canonical set of manifests and applies environment-specific patches on top. The pipeline only ever touches one file — `overlays/pi/patch-image.yaml`.
 
-**App of Apps pattern** — the Pi cluster uses one root ArgoCD Application that manages all others from `gitops/apps-pi/`. Shared apps (ingress/monitoring/Kyverno) live in `gitops/apps-shared/` and are pulled in via a nested Application.
+**App of Apps pattern** — the Pi cluster uses a root ArgoCD Application (`gitops/bootstrap/pi-infra.yaml`) that manages child applications in `gitops/apps-pi/` (app workload, shared platform apps, cloudflared tunnel, sealed-secrets).
 
-**Multi-source Helm in ArgoCD** — Prometheus and Traefik are installed via Helm charts but with values files stored in this repo. ArgoCD's multi-source feature pulls the upstream chart and our values together.
+**Multi-source Helm in ArgoCD** — Prometheus and Kyverno are installed via Helm charts with values files stored in this repo. ArgoCD's multi-source feature pulls the upstream chart and our values together.
 
 **Multi-architecture Docker image** — GitHub Actions runners are `x86_64`. The Pi is ARM64. The pipeline builds a single multi-arch manifest using QEMU and Buildx. One ECR tag, two architecture layers.
 
 **Hardened pod security context** — containers run as non-root (UID 1000), with `readOnlyRootFilesystem: true`, `allowPrivilegeEscalation: false`, and all Linux capabilities dropped. A `Memory`-backed `emptyDir` volume is mounted at `/tmp` to give Gunicorn the writable scratch space it needs.
 
-**Admission control with Kyverno** — chosen over OPA/Gatekeeper for its native Kubernetes CRD approach and simpler operational footprint on a resource-constrained Raspberry Pi. Kyverno is installed via Helm with conservative resource requests/limits, policies are scoped to the `devsecops-app` namespace and explicitly exclude system namespaces like `kube-system` and `monitoring`, and PolicyReports are cleaned up on a schedule to reduce storage churn.
+**Admission control with Kyverno** — Kyverno is the Kubernetes admission controller in this platform. It enforces image-signature verification, non-root/read-only/resource-limit guardrails, and policy-driven runtime controls at apply time. It is installed via Helm with conservative resource requests/limits, policies are scoped to `devsecops-app`, and PolicyReports are cleaned up on a schedule to reduce storage churn.
+
+**Signed-image supply chain enforcement** — the pipeline signs published images with Cosign, and Kyverno enforces signature verification (`verifyImages`) before workloads can run. This creates a CI-to-cluster trust chain where only images produced by the trusted signing key are admitted.
 
 **Cloudflare Tunnel over port forwarding** — the Pi has zero open inbound ports. Cloudflare Tunnel creates an outbound-only encrypted connection to Cloudflare's edge network.
 
@@ -155,7 +207,7 @@ All five gates run on every push to `main` and on every pull request.
 - `flask-limiter` — rate limiting
 
 **Pipeline — GitHub Actions**
-- Bandit (SAST), Trivy (secrets + container), Checkov (IaC), OWASP ZAP (DAST)
+- Bandit (SAST), Trivy (secrets + container), Syft (SBOM), Cosign (image signing), Checkov (IaC), OWASP ZAP (DAST)
 - `docker/setup-qemu-action` + `docker/setup-buildx-action` — multi-arch builds
 - `docker/build-push-action` — `linux/amd64,linux/arm64` in one manifest
 - GitOps write-back commit to `gitops/manifests/flask-app/overlays/pi/patch-image.yaml`
@@ -172,9 +224,9 @@ All five gates run on every push to `main` and on every pull request.
 - k3s — lightweight Kubernetes for ARM, single-node
 - ArgoCD — GitOps continuous delivery, App of Apps pattern
 - Kustomize — base/overlay manifest management
-- Traefik — ingress controller
+- Kyverno — admission controller and policy engine
 - kube-prometheus-stack — Prometheus + Grafana + Alertmanager
-- Cloudflare Tunnel (`cloudflared`) — public HTTPS, zero open ports
+- Cloudflare Tunnel (`cloudflared`) — in-cluster deployment for public HTTPS, zero open ports
 
 ---
 
@@ -209,16 +261,19 @@ devsecops-pipeline/
 │
 ├── gitops/
 │   ├── apps-pi/                       # ArgoCD Applications for the Pi cluster
-│   │   ├── app-of-apps.yaml           # Root app — manages the Pi cluster
+│   │   ├── pi-infra.yaml              # Root app (App of Apps)
 │   │   ├── flask-app.yaml             # Deploys overlays/pi/
 │   │   ├── apps-shared.yaml           # Nested app-of-apps → gitops/apps-shared/
-│   │   └── shared-apps.yaml           # ArgoCD networking overlay (Pi)
+│   │   ├── cloudflared-app.yaml       # Cloudflare Tunnel deployment (Pi)
+│   │   └── sealed-secrets-app.yaml    # Sealed Secrets controller (Pi)
 │   │
-│   ├── apps-shared/                   # Shared ArgoCD Applications (ingress/monitoring/Kyverno)
-│   │   ├── ingress.yaml               # Traefik via Helm
+│   ├── apps-shared/                   # Shared ArgoCD Applications (monitoring/Kyverno)
 │   │   ├── monitoring.yaml            # kube-prometheus-stack via Helm (+ custom resources)
 │   │   ├── kyverno.yaml               # Kyverno via Helm
 │   │   └── kyverno-policies.yaml      # Policies applied after Kyverno
+│   │
+│   ├── bootstrap/
+│   │   └── pi-infra.yaml              # Bootstrap manifest applied once by kubectl
 │   │
 │   ├── apps-gke/                      # ArgoCD Applications for GKE (kept separate)
 │   │   ├── flask-app.yaml
@@ -237,8 +292,15 @@ devsecops-pipeline/
 │       │           └── patch-pullsecret.yaml
 │       ├── monitoring/
 │       │   └── values.yaml
-│       └── ingress/
-│           └── values.yaml
+│       ├── kyverno/
+│       │   ├── values.yaml
+│       │   └── policies/
+│       │       ├── verify-image-signature.yaml
+│       │       └── cleanup-policy.yaml
+│       └── utils/
+│           └── cloudflared/
+│               ├── base/
+│               └── overlays/pi/
 │
 ├── scripts/
 │   └── setup-argocd-image-updater.sh   # Optional/legacy alternative deploy mechanism
@@ -344,7 +406,7 @@ kubectl create secret docker-registry ecr-secret \
 
 # 4. Apply the root application — this is the only manual kubectl apply
 #    If you fork this repo, update repoURL under gitops/apps-*/ first.
-kubectl apply -f gitops/apps-pi/app-of-apps.yaml
+kubectl apply -f gitops/bootstrap/pi-infra.yaml
 
 # 5. Watch ArgoCD bootstrap the entire cluster from Git
 kubectl -n argocd get applications -w
