@@ -1,17 +1,17 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: pi-infra
+  name: cloudflared-tunnel
   namespace: argocd
 spec:
   project: default
   source:
     repoURL: https://github.com/elorm116/devsecops-pipeline.git
     targetRevision: main
-    path: gitops/apps-pi # Point to the folder containing your app manifests
+    path: gitops/manifests/utils/cloudflared/overlays/pi
   destination:
     server: https://kubernetes.default.svc
-    namespace: argocd
+    namespace: kube-system # The tunnel runs in kube-system for cluster-wide access
   syncPolicy:
     automated:
       prune: true

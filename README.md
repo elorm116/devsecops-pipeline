@@ -74,6 +74,14 @@ Developer pushes to GitHub
                        └─────────────────────────────┘
 ```
 
+### The “Direct” architecture (Pi ingress)
+
+In a standard Kubernetes setup, public traffic typically lands on a cluster “traffic cop” (Traefik / NGINX) first. In this homelab, Cloudflare Tunnel provides the public entrypoint and forwards requests over an outbound-only encrypted tunnel.
+
+- **Cloudflare Edge** receives the request from the internet.
+- **The tunnel** carries the request through a secure “pipe” initiated from inside the Pi network.
+- **Direct handoff**: `cloudflared` acts as both the entrance and the first router — its tunnel config already maps each hostname to a specific internal destination. That destination can be a Kubernetes Service directly, or Traefik’s `web` entrypoint when you want cluster-native host-based routing. This avoids opening inbound ports on the Pi while still allowing clean routing for apps like ArgoCD.
+
 ### GitOps loop — how the Pi stays in sync
 
 ```
