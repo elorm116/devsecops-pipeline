@@ -121,7 +121,6 @@ Every deploy is a Git commit. Every rollback is a git revert.
 ```
 
 ---
-
 ## Security gates
 
 | Gate | Tool | Failure mode | What it catches |
@@ -132,6 +131,7 @@ Every deploy is a Git commit. Every rollback is a git revert.
 | Container scan (enforcement) | Trivy (CRITICAL gate) | **Hard fail** | Blocks builds when CRITICAL vulnerabilities are detected |
 | IaC scan | Checkov | Warn + artifact | Terraform misconfigurations — open security groups, encryption gaps, broad IAM |
 | DAST | OWASP ZAP baseline | Warn + artifact | Runtime web issues — missing headers, weak hardening, exposed attack surface |
+
 
 Hard-fail gates are secret scanning and CRITICAL container vulnerabilities. Other security stages are configured to keep producing evidence artifacts while still surfacing risks on every run.
 
