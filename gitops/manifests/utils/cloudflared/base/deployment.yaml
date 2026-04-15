@@ -27,12 +27,12 @@ spec:
         fsGroup: 65532
       containers:
       - name: cloudflared
-        image: cloudflare/cloudflared:2026.3.0 # Updated to a 2026 stable release
+        image: cloudflare/cloudflared:2026.3.0
         args:
         - tunnel
         - --no-autoupdate
         - --metrics
-        - 0.0.0.0:2000 # Required to make your probes work
+        - 0.0.0.0:2000
         - run
         env:
         - name: TUNNEL_TOKEN
@@ -40,6 +40,11 @@ spec:
             secretKeyRef:
               name: cloudflared-token
               key: TUNNEL_TOKEN
+        volumeMounts:
+          - name: config
+            mountPath: /etc/cloudflared/config
+            readOnly: true
+        # --- FIX: Moved these out of the volumeMounts/volumes block ---
         ports:
         - name: metrics
           containerPort: 2000
@@ -49,11 +54,11 @@ spec:
             cpu: 50m
             memory: 64Mi
           limits:
-            cpu: 150m # Slightly tightened for Pi resource management
+            cpu: 150m
             memory: 128Mi
         livenessProbe:
           httpGet:
-            path: /ready # cloudflared uses /ready for the health check endpoint
+            path: /ready
             port: metrics
           initialDelaySeconds: 10
           periodSeconds: 10
@@ -69,3 +74,7 @@ spec:
           capabilities:
             drop:
               - ALL
+      volumes:
+        - name: config
+          configMap:
+            name: cloudflared-config

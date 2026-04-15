@@ -2,3 +2,8 @@
 resources:
   - deployment.yaml
   - sealed-secret.yaml  # We will generate this next
+
+configMapGenerator:
+  - name: cloudflared-config
+    files:
+      - config.yaml
