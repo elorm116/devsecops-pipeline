@@ -23,6 +23,14 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: kyverno
+  ignoreDifferences:
+    - group: kyverno.io
+      kind: ClusterPolicy
+      jsonPointers:
+        - /spec/rules
+        - /metadata/annotations/policies.kyverno.io~1last-applied-patches
+        - /metadata/generation
+        - /status
   syncPolicy:
     automated:
       prune: true
@@ -30,3 +38,4 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
+      - RespectIgnoreDifferences=true

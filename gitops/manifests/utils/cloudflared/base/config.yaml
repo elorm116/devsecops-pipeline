@@ -9,5 +9,7 @@
 
       - hostname: web.learndevops.site
         service: http://devsecops-api.devsecops-app.svc.cluster.local:80
+        originRequest:
+          httpHostHeader: devsecops-api.devsecops-app.svc.cluster.local
 
       - service: http_status:404
