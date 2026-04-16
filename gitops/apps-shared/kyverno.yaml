@@ -1,4 +1,3 @@
-# gitops/apps-shared/kyverno.yaml
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -6,23 +5,22 @@ metadata:
   namespace: argocd
   finalizers:
     - resources-finalizer.argocd.argoproj.io
-
 spec:
   project: default
-
   sources:
     - chart: kyverno
       repoURL: https://kyverno.github.io/kyverno
-      targetRevision: "3.7.1"               # Pin stable version
+      targetRevision: "3.7.1"
       helm:
         releaseName: kyverno
         valueFiles:
-          - $values/gitops/manifests/kyverno/values.yaml   # Reference external values file
-
+          - $values/gitops/manifests/kyverno/values.yaml
+    - repoURL: https://github.com/elorm116/devsecops-pipeline.git
+      targetRevision: main
+      ref: values                    # ← this is what was missing
   destination:
     server: https://kubernetes.default.svc
     namespace: kyverno
-
   syncPolicy:
     automated:
       prune: true
@@ -30,4 +28,4 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
-      
+      - Replace=true
