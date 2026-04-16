@@ -41,5 +41,4 @@ terraform.rc
 SCRT/
 
 cosign.key
-pub-cert.pem
 cosign.pub
