@@ -10,7 +10,7 @@ namespace: devsecops-app
 
 resources:
   - ../../base                  # pull in all base manifests
-  - ../../utils/ecr-refresher 
+  - ../../../utils/ecr-refresher 
 
 patches:
   - path: patch-image.yaml      # pipeline updates image tag here
