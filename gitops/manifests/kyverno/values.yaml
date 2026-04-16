@@ -5,7 +5,8 @@
 
 admissionController:
   replicas: 1                     # Good for single-node Pi
-  webhookTimeout: 30              # ✅ Still valid in 1.17 (seconds)
+  extraArgs:
+    - --webhookTimeout=30            # The v1.17 way to increase webhook timeout (Pi can be slow)
 
   resources:
     requests:
@@ -52,11 +53,10 @@ webhookFailurePolicy: Ignore      # Prevents lockout if Kyverno restarts
 generateSuccessEvents: false
 
 # Optional but recommended for Pi
-config:
+config:            
   resourceFilters:                # Skip high-volume system resources
     - "[Event,*,*]"
     - "[*,kube-system,*]"
     - "[*,kyverno,*]"
     - "[*,kube-public,*]"
     - "[*,local-path-storage,*]"
-    
