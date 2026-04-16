@@ -1,0 +1,33 @@
+# gitops/apps-shared/kyverno.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kyverno
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+
+spec:
+  project: default
+
+  sources:
+    - chart: kyverno
+      repoURL: https://kyverno.github.io/kyverno
+      targetRevision: "3.7.1"               # Pin stable version
+      helm:
+        releaseName: kyverno
+        valueFiles:
+          - $values/gitops/manifests/kyverno/values.yaml   # Reference external values file
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kyverno
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      

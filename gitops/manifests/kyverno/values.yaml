@@ -1,12 +1,10 @@
 # gitops/manifests/kyverno/values.yaml
 #
-# Kyverno 1.17 tuned for Raspberry Pi (lightweight) + GKE Autopilot
-#
+# Kyverno tuned for Raspberry Pi (lightweight)
 
 admissionController:
-  replicas: 1                     # Good for single-node Pi
-  extraArgs:
-    - --webhookTimeout=30            # The v1.17 way to increase webhook timeout (Pi can be slow)
+  replicas: 1
+  webhookTimeout: 30                    # ← THIS is the correct field
 
   resources:
     requests:
@@ -46,17 +44,15 @@ cleanupController:
       cpu: 200m
       memory: 128Mi
 
-# Important for homelab / learning
-webhookFailurePolicy: Ignore      # Prevents lockout if Kyverno restarts
-
-# Reduce noise
+# Homelab friendly defaults:
+webhookFailurePolicy: Ignore
 generateSuccessEvents: false
 
-# Optional but recommended for Pi
-config:            
-  resourceFilters:                # Skip high-volume system resources
+config:
+  resourceFilters:
     - "[Event,*,*]"
     - "[*,kube-system,*]"
     - "[*,kyverno,*]"
     - "[*,kube-public,*]"
     - "[*,local-path-storage,*]"
+    
