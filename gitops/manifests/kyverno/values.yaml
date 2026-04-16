@@ -1,52 +1,62 @@
 # gitops/manifests/kyverno/values.yaml
 #
-# Kyverno Helm values tuned for both clusters.
-# Pi: lightweight, single replica
-# GKE Autopilot: Autopilot manages scaling automatically
+# Kyverno 1.17 tuned for Raspberry Pi (lightweight) + GKE Autopilot
 #
 
 admissionController:
-  replicas: 1                  # 1 is fine for single-node Pi and learning
+  replicas: 1                     # Good for single-node Pi
+  webhookTimeout: 30              # ✅ Still valid in 1.17 (seconds)
+
   resources:
     requests:
-      memory: 128Mi
       cpu: 100m
+      memory: 128Mi
     limits:
-      memory: 384Mi
       cpu: 500m
+      memory: 384Mi
 
 backgroundController:
+  replicas: 1
   resources:
     requests:
-      memory: 64Mi
       cpu: 50m
-    limits:
-      memory: 128Mi
-      cpu: 200m
-
-cleanupController:
-  resources:
-    requests:
       memory: 64Mi
-      cpu: 50m
     limits:
-      memory: 128Mi
       cpu: 200m
+      memory: 128Mi
 
 reportsController:
+  replicas: 1
   resources:
     requests:
-      memory: 64Mi
       cpu: 50m
+      memory: 64Mi
     limits:
-      memory: 128Mi
       cpu: 200m
+      memory: 128Mi
 
-# Webhook failure policy — Fail means if Kyverno is down, ALL admission
-# requests are blocked. Ignore means Kyverno being down = no enforcement.
-# For a learning project we use Ignore so a Kyverno restart doesn't
-# lock you out. In production this would be Fail.
-webhookFailurePolicy: Ignore
+cleanupController:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
 
-# Generate policy reports so you can see violations in kubectl
-generateSuccessEvents: false    # reduce noise — only report failures
+# Important for homelab / learning
+webhookFailurePolicy: Ignore      # Prevents lockout if Kyverno restarts
+
+# Reduce noise
+generateSuccessEvents: false
+
+# Optional but recommended for Pi
+config:
+  resourceFilters:                # Skip high-volume system resources
+    - "[Event,*,*]"
+    - "[*,kube-system,*]"
+    - "[*,kyverno,*]"
+    - "[*,kube-public,*]"
+    - "[*,local-path-storage,*]"
+    
