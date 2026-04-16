@@ -4,8 +4,9 @@
 
 admissionController:
   replicas: 1
-  webhookTimeout: 30                    # ← THIS is the correct field
-
+  container:
+    extraArgs:
+      webhookTimeout: "30"    # must be a string, not integer
   resources:
     requests:
       cpu: 100m
@@ -44,7 +45,6 @@ cleanupController:
       cpu: 200m
       memory: 128Mi
 
-# Homelab friendly defaults:
 webhookFailurePolicy: Ignore
 generateSuccessEvents: false
 
