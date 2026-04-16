@@ -3,6 +3,7 @@ kind: ClusterPolicy
 metadata:
   name: verify-image-signature
 spec:
+  webhookTimeoutSeconds: 30 # Increase timeout for image verification
   validationFailureAction: Enforce
   background: false
   rules:
