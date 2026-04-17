@@ -13,7 +13,7 @@ env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: devsecops-pipeline-secure
   GCP_REGION: me-west1
-  GCP_GAR_REPOSITORY: devsecops-pipeline-secure 
+  GCP_GAR_REPOSITORY: devsecops-pipeline-secure
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -57,11 +57,15 @@ jobs:
           exit-code: '1'
           severity: HIGH,CRITICAL
 
-  # ── 2. Build, Push & SBOM ──────────────────────────────────────────────────
+  # ── 2. Build, Push & SBOM ─────────────────────────────────────────────────
   build:
     name: Build & Push Images
     runs-on: ubuntu-latest
     needs: [sast, secrets-scan]
+    # ── Expose digests so the deploy job can use immutable references ────────
+    outputs:
+      ecr-digest: ${{ steps.build-ecr.outputs.digest }}
+      gar-digest: ${{ steps.build-gar.outputs.digest }}
     env:
       GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
       GCP_PROJECT_NUMBER: ${{ secrets.GCP_PROJECT_NUMBER }}
@@ -75,6 +79,7 @@ jobs:
 
       - uses: docker/setup-buildx-action@v4
 
+      # Build locally for scanning — no push, amd64 only for speed
       - name: Build and export image
         uses: docker/build-push-action@v7
         with:
@@ -86,8 +91,7 @@ jobs:
           outputs: type=docker,dest=/tmp/image.tar
 
       - name: Load image into Docker daemon
-        run: |
-          docker load -i /tmp/image.tar
+        run: docker load -i /tmp/image.tar
 
       - name: Upload Docker artifact
         uses: actions/upload-artifact@v4
@@ -123,8 +127,10 @@ jobs:
         id: ecr-login
         uses: aws-actions/amazon-ecr-login@v2
 
+      # id: build-ecr — digest captured via outputs.ecr-digest
       - name: Build and push to ECR
         if: github.ref == 'refs/heads/main'
+        id: build-ecr
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -154,8 +160,10 @@ jobs:
         if: github.ref == 'refs/heads/main' && env.GCP_PROJECT_NUMBER != '' && env.GCP_WORKLOAD_IDENTITY_POOL != '' && env.GCP_SERVICE_ACCOUNT != '' && env.GCP_PROJECT_ID != ''
         run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev --quiet
 
+      # id: build-gar — digest captured via outputs.gar-digest
       - name: Build and push to GCP
         if: github.ref == 'refs/heads/main' && env.GCP_PROJECT_NUMBER != '' && env.GCP_WORKLOAD_IDENTITY_POOL != '' && env.GCP_SERVICE_ACCOUNT != '' && env.GCP_PROJECT_ID != ''
+        id: build-gar
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -169,8 +177,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # --- COSIGN INSTALL & SIGNING (AWS & GCP) ---
-      # This part digitally signs the images so Kyverno can verify them later. I have defined a policy for Kyverno to use for the verification.
+      # --- COSIGN SIGNING (by digest, not tag) ---
       - name: Install Cosign
         if: github.ref == 'refs/heads/main'
         uses: sigstore/cosign-installer@v4.1.0
@@ -180,22 +187,23 @@ jobs:
         env:
           COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
-          # Identifying the specific SHA tags for signing
-          ECR_TAG: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:sha-${{ github.sha }}
-          GAR_TAG: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.GCP_GAR_REPOSITORY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+          # Sign by digest — immutable and what Kyverno actually verifies
+          ECR_REF: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.build-ecr.outputs.digest }}
+          GAR_REF: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.GCP_GAR_REPOSITORY }}/${{ env.IMAGE_NAME }}@${{ steps.build-gar.outputs.digest }}
         run: |
           echo "$COSIGN_PRIVATE_KEY" > cosign.key
-          
-          echo "Signing AWS ECR image..."
-          cosign sign --key cosign.key $ECR_TAG
-          
-          # Only sign GAR if the project ID is set (checking one GCP variable as a proxy)
+
+          echo "Signing AWS ECR image by digest..."
+          cosign sign --key cosign.key $ECR_REF
+
           if [ "${{ secrets.GCP_PROJECT_ID }}" != "" ]; then
-            echo "Signing GCP GAR image..."
-            cosign sign --key cosign.key $GAR_TAG
+            echo "Signing GCP GAR image by digest..."
+            cosign sign --key cosign.key $GAR_REF
           fi
 
-  # ── 3. Runtime & IaC Scans ──────────────────────────────────────────────────
+          rm -f cosign.key
+
+  # ── 3. Runtime & IaC Scans ────────────────────────────────────────────────
   container-scan:
     name: Container Scan — Trivy
     needs: build
@@ -207,7 +215,7 @@ jobs:
       - name: Load image into Docker
         run: docker load -i /tmp/image.tar
 
-      # Step A: Detailed Scan for GitHub Security Tab
+      # Step A: Detailed scan for GitHub Security tab
       - uses: aquasecurity/trivy-action@v0.35.0
         with:
           image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
@@ -215,21 +223,21 @@ jobs:
           output: trivy-results.sarif
           severity: HIGH,CRITICAL
 
-      # Step B: The "Security Gate" (Fails the build if Criticals found)
+      # Step B: Security gate — fails the build if unfixable criticals are found
       - name: Enforcement - Fail on Criticals
         uses: aquasecurity/trivy-action@v0.35.0
         with:
           image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
           format: table
           exit-code: '1'
-          ignore-unfixed: true # Only fail on things you CAN fix
+          ignore-unfixed: true
           severity: CRITICAL
 
       - uses: github/codeql-action/upload-sarif@v3
         if: always()
         with: { sarif_file: trivy-results.sarif }
 
-# ---- Send Slack Alert if Container Scan Suceeds -----
+      # --- Slack Notifications ---
       - name: Send Slack Success Notification
         if: success()
         uses: slackapi/slack-github-action@v3.0.1
@@ -250,7 +258,6 @@ jobs:
               }]
             }
 
-# ---- Send Slack Alert if Container Scan Fails -----
       - name: Send Slack Failure Notification
         if: failure()
         uses: slackapi/slack-github-action@v3.0.1
@@ -306,11 +313,11 @@ jobs:
         if: always()
         run: docker rm -f staging-app || true
 
-  # ── 4. Unified GitOps Deployment ────────────────────────────────────────────
+  # ── 4. Unified GitOps Deployment ──────────────────────────────────────────
   deploy:
     name: Sync GitOps Manifests
     runs-on: ubuntu-latest
-    needs: [dast]
+    needs: [dast, build]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push' && !contains(github.event.head_commit.message, '[skip ci]')
     steps:
       - uses: actions/checkout@v4
@@ -322,23 +329,25 @@ jobs:
       - name: Update Both Overlays
         run: |
           git pull --rebase origin main
-          
-          # Update Pi (AWS ECR)
+
+          # ── Pi overlay (AWS ECR) — immutable digest reference ──────────────
           PATCH_PI=gitops/manifests/flask-app/overlays/pi/patch-image.yaml
           ECR_URL="393818036545.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}"
-          sed -i -E "s|^([[:space:]]*)image:.*|\1image: $ECR_URL:sha-${{ github.sha }}|" "$PATCH_PI"
-          
-          # Update GKE (GCP GAR)
+          ECR_DIGEST="${{ needs.build.outputs.ecr-digest }}"
+          sed -i -E "s|^([[:space:]]*)image:.*|\1image: $ECR_URL@$ECR_DIGEST|" "$PATCH_PI"
+
+          # ── GKE overlay (GCP GAR) — immutable digest reference ─────────────
           PATCH_GKE=gitops/manifests/flask-app/overlays/gke/patch-image.yaml
           GAR_URL="${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.GCP_GAR_REPOSITORY }}/${{ env.IMAGE_NAME }}"
-          sed -i -E "s|^([[:space:]]*)image:.*|\1image: $GAR_URL:sha-${{ github.sha }}|" "$PATCH_GKE"
-          
+          GAR_DIGEST="${{ needs.build.outputs.gar-digest }}"
+          sed -i -E "s|^([[:space:]]*)image:.*|\1image: $GAR_URL@$GAR_DIGEST|" "$PATCH_GKE"
+
           git config user.name "github-actions[bot]"
           git config user.email "actions@github.com"
           git add "$PATCH_PI" "$PATCH_GKE"
-          
+
           git commit -m "chore(gitops): deploy sha-${{ github.sha }} to all clusters [skip ci]" || exit 0
-          
+
           for i in 1 2 3; do
             if git push origin main; then
               exit 0
@@ -347,3 +356,4 @@ jobs:
             git pull --rebase origin main
           done
           exit 1
+          
