@@ -1,4 +1,4 @@
-name: DevSecOps Pipeline
+name: Juice Shop DevSecOps Pipeline
 
 on:
   push:
