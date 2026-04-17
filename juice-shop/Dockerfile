@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && usermod -l juicer node \
     && groupmod -n juicer node \
-    && usermod -d /home/juicer -m juicer \
+    && usermod -d /home/juicer -m juicer 
 
 WORKDIR /juice-shop
 
