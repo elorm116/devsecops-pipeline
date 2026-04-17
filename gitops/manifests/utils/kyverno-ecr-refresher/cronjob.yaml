@@ -30,20 +30,18 @@ spec:
                 curl -L "https://dl.k8s.io/release/v1.30.0/bin/linux/arm64/kubectl" -o /tmp/kubectl
                 chmod +x /tmp/kubectl
 
-                echo "🔄 Refreshing ECR token for Kyverno..."
                 TOKEN=$(aws ecr get-login-password --region us-east-1)
 
-                echo "🗑️ Deleting old secret..."
-                /tmp/kubectl delete secret regcred -n kyverno --ignore-not-found=true
-
-                echo "🔑 Creating new docker secret 'regcred' in kyverno namespace..."
-                /tmp/kubectl create secret docker-registry regcred \
-                  --docker-server=393818036545.dkr.ecr.us-east-1.amazonaws.com \
-                  --docker-username=AWS \
-                  --docker-password="$TOKEN" \
-                  -n kyverno
-
-                echo "✅ Kyverno ECR token refreshed successfully!"
+                for NAMESPACE in kyverno devsecops-app juice-shop; do
+                  echo "🔑 Refreshing ECR secret in namespace: $NAMESPACE"
+                  /tmp/kubectl delete secret regcred -n $NAMESPACE --ignore-not-found=true
+                  /tmp/kubectl create secret docker-registry regcred \
+                    --docker-server=393818036545.dkr.ecr.us-east-1.amazonaws.com \
+                    --docker-username=AWS \
+                    --docker-password="$TOKEN" \
+                    -n $NAMESPACE
+                  echo "✅ Done: $NAMESPACE"
+                done
             env:
               - name: AWS_ACCESS_KEY_ID
                 valueFrom:

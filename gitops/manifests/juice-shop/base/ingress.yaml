@@ -1,0 +1,29 @@
+# gitops/manifests/juice-shop/base/ingress.yaml
+#
+# Traefik ingress for Juice Shop.
+# Matches the same pattern as the Flask app ingress.
+# Cloudflare Tunnel routes juice.learndevops.site → this ingress.
+#
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: juice-shop
+  labels:
+    app.kubernetes.io/name: juice-shop
+    app.kubernetes.io/component: web
+    app.kubernetes.io/managed-by: argocd
+  annotations:
+    # Force Traefik to handle this ingress
+    kubernetes.io/ingress.class: traefik
+spec:
+  rules:
+    - host: juice.learndevops.site
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: juice-shop
+                port:
+                  name: http

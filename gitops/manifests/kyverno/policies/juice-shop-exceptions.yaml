@@ -1,0 +1,155 @@
+# gitops/manifests/kyverno/policies/juice-shop-exceptions.yaml
+#
+# KYVERNO POLICY EXCEPTIONS — juice-shop namespace only
+#
+# WHY THIS EXISTS:
+# ----------------
+# Our ClusterPolicies (require-readonly-fs, require-resource-limits,
+# disallow-privileged, require-non-root) apply to specific namespaces.
+# They currently only match devsecops-app, so juice-shop is NOT automatically
+# blocked by those policies.
+#
+# However, we add EXPLICIT rules here for juice-shop so the security
+# posture is intentional and documented — not just an accidental gap.
+#
+# WHAT WE ALLOW IN juice-shop (and why):
+# ----------------------------------------
+# 1. readOnlyRootFilesystem: false
+#    Juice Shop's Express server and SQLite database write to the
+#    container filesystem at runtime. We mount /juice-shop/data as
+#    an emptyDir for the DB, but the app also writes logs and temp
+#    files elsewhere. Requiring readOnly would crash the app.
+#    MITIGATION: emptyDir volume limits blast radius. Pod restart
+#    wipes all written data. No persistent volume = no persistence
+#    for an attacker either.
+#
+# 2. Image signature verification still ENFORCED
+#    Even with relaxed filesystem rules, Juice Shop images MUST be
+#    signed by our Cosign key and pushed through our pipeline.
+#    This proves the image hasn't been tampered with even if the
+#    app itself is intentionally vulnerable.
+#
+# WHAT WE DO NOT ALLOW (still enforced):
+# ----------------------------------------
+# - privileged: true                → blocked
+# - allowPrivilegeEscalation: true  → blocked
+# - runAsRoot (UID 0)               → blocked (our image uses UID 1000)
+# - Missing resource limits         → blocked
+# - Unsigned images                 → blocked by verify-image-signature
+#
+---
+# Enforce resource limits in juice-shop namespace
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: juice-shop-require-resource-limits
+  annotations:
+    policies.kyverno.io/title: Juice Shop — Require Resource Limits
+    policies.kyverno.io/category: Security
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/description: >
+      Ensures Juice Shop containers declare resource limits.
+      Prevents a ZAP scan spike from starving the rest of the cluster.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: check-resource-limits
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - juice-shop
+      validate:
+        message: >
+          All containers in juice-shop must specify resource limits.
+          This prevents scan-induced CPU/memory spikes from killing the node.
+        pattern:
+          spec:
+            containers:
+              - resources:
+                  limits:
+                    memory: "?*"
+                    cpu: "?*"
+                  requests:
+                    memory: "?*"
+                    cpu: "?*"
+
+---
+# Block privileged containers in juice-shop namespace
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: juice-shop-disallow-privileged
+  annotations:
+    policies.kyverno.io/title: Juice Shop — Disallow Privileged Containers
+    policies.kyverno.io/category: Security
+    policies.kyverno.io/severity: critical
+    policies.kyverno.io/description: >
+      Even though Juice Shop is intentionally vulnerable,
+      we never allow privileged containers. A compromised
+      privileged container = full node compromise.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: check-not-privileged
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - juice-shop
+      validate:
+        message: >
+          Privileged containers are not allowed even in juice-shop.
+          The app is intentionally vulnerable — the cluster is not.
+        pattern:
+          spec:
+            containers:
+              - =(securityContext):
+                  =(privileged): false
+                  allowPrivilegeEscalation: false
+
+---
+# Require non-root in juice-shop namespace
+# This is what blocks the OFFICIAL Juice Shop image (runs as root).
+# Only our hardened custom image (UID 1000) passes this gate.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: juice-shop-require-non-root
+  annotations:
+    policies.kyverno.io/title: Juice Shop — Require Non-Root
+    policies.kyverno.io/category: Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >
+      The official OWASP Juice Shop image runs as root (UID 0).
+      This policy BLOCKS that image. Only our pipeline-built hardened
+      image (UID 1000) is admitted. This is the "Kyverno redemption"
+      story — the pipeline fixes what the upstream image got wrong.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: check-non-root
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - juice-shop
+      validate:
+        message: >
+          The official Juice Shop image runs as root and is blocked.
+          Only the pipeline-hardened image (runAsUser: 1000) is admitted.
+          This is intentional — deploy via the CI/CD pipeline only.
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  runAsNonRoot: "true"

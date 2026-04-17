@@ -13,3 +13,13 @@
           httpHostHeader: devsecops-api.devsecops-app.svc.cluster.local
 
       - service: http_status:404
+
+  # OWASP Juice Shop — intentionally vulnerable, do not expose without auth
+  # Consider adding Cloudflare Access policy on this hostname in the
+  # Cloudflare dashboard to restrict who can reach it.
+      - hostname: juice.learndevops.site
+        service: http://juice-shop.juice-shop.svc.cluster.local:80
+        originRequest:
+          httpHostHeader: juice-shop.juice-shop.svc.cluster.local
+    
+      - service: http_status:404

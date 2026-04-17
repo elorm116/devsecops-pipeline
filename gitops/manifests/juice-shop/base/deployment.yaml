@@ -1,0 +1,120 @@
+# gitops/manifests/juice-shop/base/deployment.yaml
+#
+# OWASP Juice Shop — intentionally vulnerable Node.js application.
+#
+# SECURITY POSTURE (intentional relaxations documented):
+# -------------------------------------------------------
+# 1. runAsUser: 1000 — We rebuild the image to run as non-root.
+#    The official image runs as root (UID 0), which our require-non-root
+#    ClusterPolicy would block. Our custom image fixes this.
+#
+# 2. readOnlyRootFilesystem: false — Juice Shop writes session data,
+#    SQLite DB, and logs to its own filesystem at runtime. Unlike our
+#    Flask app which uses explicit emptyDir mounts, Juice Shop's
+#    internal Express/SQLite stack expects a writable FS.
+#    A Kyverno policy exception is scoped to this namespace only.
+#
+# 3. No imagePullSecrets — Image is pulled from ECR, signed with Cosign,
+#    and verified by Kyverno just like the Flask app. The ecr-refresher
+#    CronJob in this namespace handles the pull secret rotation.
+#
+# WHY THIS IS VALUABLE FOR DEVSECOPS DEMONSTRATION:
+# --------------------------------------------------
+# - SAST (Bandit equiv for JS: njsscan) will find real vulns in source
+# - DAST (ZAP) will discover 100+ OWASP Top 10 findings
+# - Trivy will surface CVEs in the npm dependency tree
+# - Kyverno blocks the ROOT version — only our hardened image deploys
+# - This proves the pipeline enforces security, not just reports it
+#
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: juice-shop
+  labels:
+    app.kubernetes.io/name: juice-shop
+    app.kubernetes.io/component: web
+    app.kubernetes.io/managed-by: argocd
+spec:
+  revisionHistoryLimit: 2
+  replicas: 1                        # Single replica — Pi RAM is precious
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: juice-shop
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0              # Never drop below 1 running instance
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: juice-shop
+      annotations:
+        # ZAP DAST target annotation — documents this pod as a scan target
+        security.devsecops/dast-target: "true"
+        security.devsecops/scan-url: "http://juice-shop.juice-shop.svc.cluster.local:3000"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000              # Our hardened image runs as this UID
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: juice-shop
+          # Pipeline updates this digest on every push via sed in deploy job
+          image: 393818036545.dkr.ecr.us-east-1.amazonaws.com/juice-shop:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            - name: NODE_ENV
+              value: production
+            # Juice Shop honours this to disable the built-in CTF banner
+            - name: CTF_KEY
+              value: ""
+          resources:
+            requests:
+              memory: 256Mi          # Node.js baseline on ARM64
+              cpu: 100m
+            limits:
+              memory: 512Mi          # Headroom for ZAP scan spikes
+              cpu: 500m
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false   # Exception — see header comment
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: juice-shop-data
+              mountPath: /juice-shop/data   # SQLite DB lives here
+          startupProbe:
+            httpGet:
+              path: /rest/admin/application-version
+              port: 3000
+            failureThreshold: 30           # Node.js cold start on ARM64 is slow
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /rest/admin/application-version
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /rest/admin/application-version
+              port: 3000
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 10
+      volumes:
+        - name: juice-shop-data
+          emptyDir:
+            sizeLimit: 256Mi         # SQLite + logs, reset on pod restart
+      imagePullSecrets:
+        - name: regcred           # Rotated every 6h by ecr-refresher CronJob

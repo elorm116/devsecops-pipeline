@@ -1,0 +1,30 @@
+# gitops/manifests/juice-shop/overlays/pi/patch-image.yaml
+#
+# THE PIPELINE OWNS THIS FILE.
+# The deploy job updates the digest on every successful push to main.
+# Format: image: <ecr-url>@sha256:<digest>
+# Kyverno verifies the Cosign signature against this exact digest.
+#
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: juice-shop
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: juice-shop
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: juice-shop
+    spec:
+      containers:
+        - name: juice-shop
+          image: 393818036545.dkr.ecr.us-east-1.amazonaws.com/juice-shop:latest
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false   # Juice Shop needs writable FS
+            capabilities:
+              drop: ["ALL"]

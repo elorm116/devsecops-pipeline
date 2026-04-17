@@ -1,0 +1,13 @@
+# gitops/manifests/juice-shop/overlays/pi/patch-replicas.yaml
+#
+# Pi homelab: single replica only.
+# Juice Shop at idle uses ~250-350MB. Two replicas would consume
+# 500-700MB which competes with Prometheus and ArgoCD on 8GB RAM.
+# Scale up if you move to a multi-node cluster.
+#
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: juice-shop
+spec:
+  replicas: 1

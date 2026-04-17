@@ -1,0 +1,15 @@
+# gitops/manifests/juice-shop/base/namespace.yaml
+#
+# Dedicated namespace for OWASP Juice Shop.
+# Isolated from devsecops-app so Kyverno policies can be
+# scoped independently — the intentionally vulnerable app
+# needs different (relaxed) security rules vs our production app.
+#
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: juice-shop
+  labels:
+    app.kubernetes.io/name: juice-shop
+    environment: pi-homelab
+    security-profile: relaxed   # signals to Kyverno which rules apply here

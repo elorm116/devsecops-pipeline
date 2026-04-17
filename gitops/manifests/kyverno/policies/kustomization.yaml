@@ -9,3 +9,4 @@ resources:
   - disallow-privileged.yaml
   - verify-image-signature.yaml
   - cleanup-policy.yaml
+  - juice-shop-exceptions.yaml  # Scoped rules for juice-shop namespace

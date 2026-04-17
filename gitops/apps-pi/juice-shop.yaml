@@ -1,0 +1,41 @@
+# gitops/apps-pi/juice-shop.yaml
+#
+# ArgoCD Application — OWASP Juice Shop
+#
+# This app is intentionally vulnerable by design. It exists to:
+#   1. Prove the DevSecOps pipeline catches real vulnerabilities
+#   2. Demonstrate Kyverno blocking non-compliant images
+#   3. Give OWASP ZAP a real attack surface during DAST scans
+#
+# It is isolated in the juice-shop namespace with its own
+# Kyverno policy exceptions scoped to that namespace only.
+# The production Flask app in devsecops-app is unaffected.
+#
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: juice-shop
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/elorm116/devsecops-pipeline.git
+    targetRevision: main
+    path: gitops/manifests/juice-shop/overlays/pi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: juice-shop
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  ignoreDifferences:
+    - group: networking.k8s.io
+      kind: Ingress
+      jsonPointers:
+        - /status/loadBalancer

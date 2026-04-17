@@ -14,12 +14,14 @@ spec:
           - resources:
               namespaces:
                 - devsecops-app
+                - juice-shop
               kinds:
                 - Pod
       verifyImages:
         - imageReferences:
              # Matches both tag and digest references e.g. :sha-... and @sha256:...
             - "393818036545.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-secure*"
+            - "393818036545.dkr.ecr.us-east-1.amazonaws.com/juice-shop*" #Juice-shop image registry, also signed with the same key
             - "me-west1-docker.pkg.dev/*/devsecops-pipeline-secure/*"
           imageRegistryCredentials:   # ✅ Correct for v1.17.1
             secrets:

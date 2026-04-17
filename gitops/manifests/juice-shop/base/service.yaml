@@ -1,0 +1,23 @@
+# gitops/manifests/juice-shop/base/service.yaml
+#
+# ClusterIP service — Juice Shop is only reachable inside the cluster.
+# External access goes through Cloudflare Tunnel → Traefik Ingress,
+# the same pattern as the Flask app. No NodePort exposed directly.
+#
+apiVersion: v1
+kind: Service
+metadata:
+  name: juice-shop
+  labels:
+    app.kubernetes.io/name: juice-shop
+    app.kubernetes.io/component: web
+    app.kubernetes.io/managed-by: argocd
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: juice-shop
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3000
+      protocol: TCP

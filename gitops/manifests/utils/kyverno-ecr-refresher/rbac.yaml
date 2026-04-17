@@ -1,3 +1,4 @@
+# gitops/manifests/utils/kyverno-ecr-refresher/rbac.yaml
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -5,25 +6,24 @@ metadata:
   namespace: kyverno
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
+kind: ClusterRole
 metadata:
   name: ecr-token-refresher
-  namespace: kyverno
 rules:
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["get", "create", "delete", "patch"] # Added delete for your script's logic
+    verbs: ["get", "create", "delete", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
+kind: ClusterRoleBinding
 metadata:
   name: ecr-token-refresher
-  namespace: kyverno
 subjects:
   - kind: ServiceAccount
     name: ecr-token-refresher
     namespace: kyverno
 roleRef:
-  kind: Role
+  kind: ClusterRole
   name: ecr-token-refresher
   apiGroup: rbac.authorization.k8s.io
+  
