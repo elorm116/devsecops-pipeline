@@ -26,3 +26,8 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true   # handles large CRDs cleanly
+  ignoreDifferences:
+    - group: networking.k8s.io
+      kind: Ingress
+      jsonPointers:
+        - /status/loadBalancer
