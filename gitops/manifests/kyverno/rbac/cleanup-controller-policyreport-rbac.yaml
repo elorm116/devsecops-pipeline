@@ -10,3 +10,13 @@ rules:
   - apiGroups: ["wgpolicyk8s.io"]
     resources: ["policyreports", "clusterpolicyreports"]
     verbs: ["get", "list", "watch", "delete"]
+
+  # Add this to your manual ClusterRole or a new one
+  - apiGroups: ["admissionregistration.k8s.io"]
+    resources: ["validatingwebhookconfigurations"]
+    verbs: ["get", "list", "watch"]
+
+  # Fixes the "Forbidden: cannot watch policyexceptions" error 
+  - apiGroups: ["kyverno.io", "policies.kyverno.io"]
+    resources: ["policyexceptions"]
+    verbs: ["get", "list", "watch"]
