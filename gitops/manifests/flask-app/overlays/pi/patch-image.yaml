@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: api
-          image: 393818036545.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-secure@sha256:3d69069c7396e862c41e9e2c84fd62069afa86a8a7650816377fea9676144232
+          image: 393818036545.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-secure@sha256:a5a887d3bf009e0561750f5f2a104a766d063707e13c2b3acf66e610f58a9f84
           resources:
             requests:
               memory: 64Mi
