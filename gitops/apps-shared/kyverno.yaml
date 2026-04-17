@@ -40,3 +40,15 @@ spec:
       jsonPointers:
         - /metadata/annotations
         - /metadata/labels
+        #Added to stop fighting over PostSync hook RBAC
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRole
+      name: "kyverno:migrate-resources"
+      jsonPointers:
+        - /rules
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRoleBinding
+      name: "kyverno:migrate-resources"
+      jsonPointers:
+        - /roleRef
+        - /subjects
