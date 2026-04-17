@@ -6,7 +6,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/anthonyzottor/devsecops-pipeline.git
+    repoURL: https://github.com/elorm116/devsecops-pipeline.git
     targetRevision: main
     path: gitops/manifests/utils/kyverno-ecr-refresher # Pointing to the NEW folder
   destination:
