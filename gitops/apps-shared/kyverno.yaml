@@ -34,3 +34,9 @@ spec:
       kind: Application
       jsonPointers:
         - /metadata/finalizers
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+      # Only ignore the empty ones if they cause trouble
+      jsonPointers:
+        - /metadata/annotations
+        - /metadata/labels
