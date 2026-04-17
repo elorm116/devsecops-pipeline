@@ -6,6 +6,8 @@ spec:
   webhookTimeoutSeconds: 30 # Increase timeout for image verification
   validationFailureAction: Enforce
   background: false
+  imagePullSecrets:
+    - name: regcred
   rules:
     - name: verify-signature
       match:
