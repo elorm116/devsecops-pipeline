@@ -12,4 +12,4 @@ spec:
     spec:
       containers:
         - name: api
-          image: me-west1-docker.pkg.dev/project-31856ac9-76a2-472d-96c/devsecops-pipeline-secure/devsecops-api@sha256:72d3c8804a31acb1e72f091f8903ca5a92b174daae443d4aa87b17d4bb65193c
+          image: me-west1-docker.pkg.dev/project-31856ac9-76a2-472d-96c/devsecops-pipeline-secure/devsecops-api@sha256:7f5035bd2a0185e70286091ce7df463de3f9260cc65a29124110829d0df5a653
