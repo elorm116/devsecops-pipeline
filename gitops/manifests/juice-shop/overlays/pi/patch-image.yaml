@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
         - name: juice-shop
-          image: 393818036545.dkr.ecr.us-east-1.amazonaws.com/juice-shop@sha256:fb9b80d8c3372cfda1f8828150d0558be82b7a0bf1b7b4694aed7030ebbef144
+          image: 393818036545.dkr.ecr.us-east-1.amazonaws.com/juice-shop@sha256:2e4b50c0c1bb050ea84842183e5a5cdc46a50445b18876ec0a2a85aceeef09ce
           securityContext:
             runAsNonRoot: true
             runAsUser: 1000
