@@ -18,7 +18,8 @@ spec:
                 - Pod
       verifyImages:
         - imageReferences:
-            - "393818036545.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-secure:*"
+             # Matches both tag and digest references e.g. :sha-... and @sha256:...
+            - "393818036545.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-secure*"
             - "me-west1-docker.pkg.dev/*/devsecops-pipeline-secure/*"
           imageRegistryCredentials:   # ✅ Correct for v1.17.1
             secrets:
