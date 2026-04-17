@@ -29,3 +29,8 @@ spec:
       - CreateNamespace=true
       - ServerSideApply=true
       - Replace=true
+  ignoreDifferences:
+    - group: argoproj.io
+      kind: Application
+      jsonPointers:
+        - /metadata/finalizers
