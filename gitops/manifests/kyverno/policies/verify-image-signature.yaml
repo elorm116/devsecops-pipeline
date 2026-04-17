@@ -1,5 +1,5 @@
 #gitops/manifests/kyverno/policies/verify-image-signature.yaml
-apiVersion: kyverno.io/v2beta1
+apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
   name: verify-image-signature
