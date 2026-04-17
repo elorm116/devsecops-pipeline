@@ -14,9 +14,8 @@
 #    internal Express/SQLite stack expects a writable FS.
 #    A Kyverno policy exception is scoped to this namespace only.
 #
-# 3. No imagePullSecrets — Image is pulled from ECR, signed with Cosign,
-#    and verified by Kyverno just like the Flask app. The ecr-refresher
-#    CronJob in this namespace handles the pull secret rotation.
+# 3. imagePullSecrets: regcred — rotated every 6h by kyverno-ecr-refresher
+#    CronJob which now covers both kyverno and juice-shop namespaces.
 #
 # WHY THIS IS VALUABLE FOR DEVSECOPS DEMONSTRATION:
 # --------------------------------------------------
@@ -36,7 +35,7 @@ metadata:
     app.kubernetes.io/managed-by: argocd
 spec:
   revisionHistoryLimit: 2
-  replicas: 1                        # Single replica — Pi RAM is precious
+  replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: juice-shop
@@ -44,26 +43,24 @@ spec:
     type: RollingUpdate
     rollingUpdate:
       maxSurge: 1
-      maxUnavailable: 0              # Never drop below 1 running instance
+      maxUnavailable: 0
   template:
     metadata:
       labels:
         app.kubernetes.io/name: juice-shop
       annotations:
-        # ZAP DAST target annotation — documents this pod as a scan target
         security.devsecops/dast-target: "true"
         security.devsecops/scan-url: "http://juice-shop.juice-shop.svc.cluster.local:3000"
     spec:
       securityContext:
         runAsNonRoot: true
-        runAsUser: 1000              # Our hardened image runs as this UID
+        runAsUser: 1000
         runAsGroup: 1000
         fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
       containers:
         - name: juice-shop
-          # Pipeline updates this digest on every push via sed in deploy job
           image: 393818036545.dkr.ecr.us-east-1.amazonaws.com/juice-shop:latest
           imagePullPolicy: Always
           ports:
@@ -73,29 +70,30 @@ spec:
           env:
             - name: NODE_ENV
               value: production
-            # Juice Shop honours this to disable the built-in CTF banner
             - name: CTF_KEY
               value: ""
           resources:
             requests:
-              memory: 256Mi          # Node.js baseline on ARM64
+              memory: 256Mi
               cpu: 100m
             limits:
-              memory: 512Mi          # Headroom for ZAP scan spikes
+              memory: 512Mi
               cpu: 500m
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false   # Exception — see header comment
+            readOnlyRootFilesystem: false
             capabilities:
               drop: ["ALL"]
           volumeMounts:
             - name: juice-shop-data
-              mountPath: /juice-shop/data   # SQLite DB lives here
+              mountPath: /juice-shop/data/chatbot  # ← scoped to chatbot only
+                                                   # data/static remains intact
+                                                   # from image layer
           startupProbe:
             httpGet:
               path: /rest/admin/application-version
               port: 3000
-            failureThreshold: 30           # Node.js cold start on ARM64 is slow
+            failureThreshold: 30
             periodSeconds: 5
           livenessProbe:
             httpGet:
@@ -115,6 +113,6 @@ spec:
       volumes:
         - name: juice-shop-data
           emptyDir:
-            sizeLimit: 256Mi         # SQLite + logs, reset on pod restart
+            sizeLimit: 256Mi        # ← mountPath removed from here
       imagePullSecrets:
-        - name: regcred           # Rotated every 6h by ecr-refresher CronJob
+        - name: regcred             # Rotated every 6h by kyverno-ecr-refresher
