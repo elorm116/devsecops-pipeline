@@ -1,13 +1,12 @@
+#gitops/manifests/kyverno/policies/verify-image-signature.yaml
 apiVersion: kyverno.io/v2beta1
 kind: ClusterPolicy
 metadata:
   name: verify-image-signature
 spec:
-  webhookTimeoutSeconds: 30 # Increase timeout for image verification
+  webhookTimeoutSeconds: 30
   validationFailureAction: Enforce
   background: false
-  imagePullSecrets:
-    - name: regcred
   rules:
     - name: verify-signature
       match:
@@ -21,6 +20,8 @@ spec:
         - imageReferences:
             - "393818036545.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-secure:*"
             - "me-west1-docker.pkg.dev/*/devsecops-pipeline-secure/*"
+          imagePullSecrets:  # This is the secret that Kyverno will use to pull the image and verify its signature. It should have access to the public keys for verification.
+            - name: regcred # Note: In case you are following this guide, this secret must be created in the cluster and contain the necessary credentials to access the image registry, even if it's just for pulling public keys for signature verification.
           attestors:
             - count: 1
               entries:
