@@ -65,7 +65,8 @@ aws ecr create-repository \
 
 ## Step 2 — Add Pipeline Jobs
 
-Add two new jobs to your `.github/workflows/pipeline.yaml`:
+This repo already includes these changes in `.github/workflows/juice-shop-pipeline.yaml`.
+If you’re integrating Juice Shop into a different workflow in your own repo, use the same patterns below.
 
 ### A. Build job addition — juice-shop
 
@@ -96,8 +97,8 @@ outputs:
     cache-from: type=gha
     cache-to: type=gha,mode=max
 
-# Sign Juice Shop image — add to the Sign the images step:
-- name: Sign Juice Shop image
+# Sign Juice Shop image by digest (recommended) — add to your existing signing step:
+- name: Sign all images by digest
   if: github.ref == 'refs/heads/main'
   env:
     COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
@@ -141,13 +142,17 @@ dast:
         cmd_options: -I
 
     # Scan Juice Shop (new) — use full scan not baseline for more findings
-    - name: Pull and start Juice Shop staging
+    # Recommended: run against the locally-built image artifact so this job
+    # does not require AWS credentials to pull from ECR.
+    - uses: actions/download-artifact@v4
+      with: { name: juice-shop-image, path: /tmp }
+    - run: docker load -i /tmp/juice-shop.tar
+    - name: Start Juice Shop staging
       run: |
-        docker pull ${{ steps.ecr-login.outputs.registry }}/juice-shop:${{ github.sha }} || true
         docker run -d --name juice-staging \
           -p 3000:3000 \
           -e NODE_ENV=production \
-          ${{ steps.ecr-login.outputs.registry }}/juice-shop:${{ github.sha }}
+          juice-shop:${{ github.sha }}
         sleep 30  # Node.js needs longer to start
     - name: ZAP Full Scan — Juice Shop
       uses: zaproxy/action-full-scan@v0.11.0   # Full scan vs baseline for more findings
@@ -204,7 +209,7 @@ verifyImages:
       - "me-west1-docker.pkg.dev/*/devsecops-pipeline-secure/*"
     imageRegistryCredentials:
       secrets:
-        - name: ecr-creds
+        - name: regcred
     attestors:
       - count: 1
         entries:
