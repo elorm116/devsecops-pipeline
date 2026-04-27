@@ -731,7 +731,8 @@ resource "aws_iam_role_policy" "github_actions_ecr" {
 ################################################################################
 
 resource "aws_ecr_repository" "juice_shop" {
-  #checkov:skip=CKV_AWS_51:Mutable tags required for latest convenience tag; deployments use digests
+  #checkov:skip=CKV_AWS_51:Mutable tags required; deployments use digests
+  #checkov:skip=CKV_AWS_136:AES256 used to avoid forced replacement of existing repo; acceptable for deliberately vulnerable target
   name                 = "juice-shop"
   image_tag_mutability = "MUTABLE"
 

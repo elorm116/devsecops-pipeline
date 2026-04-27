@@ -26,6 +26,12 @@ provider "aws" {
 # 1. Provide an S3 Bucket for remote state
 resource "aws_s3_bucket" "terraform_state" {
   bucket = var.state_bucket_name
+  #checkov:skip=CKV2_AWS_62:Event notifications not required for state bucket — no downstream consumers
+  #checkov:skip=CKV2_AWS_61:State bucket retention managed manually — lifecycle automation risks accidental state deletion
+  #checkov:skip=CKV_AWS_144:Cross-region replication omitted — cost vs benefit tradeoff for homelab state
+  #checkov:skip=CKV_AWS_145:KMS encryption omitted for state bucket — S3-managed encryption is sufficient for this lab
+  #checkov:skip=CKV_AWS_18:Access logging on state bucket would create recursive logging — not needed for lab
+ 
 
   # Prevent accidental deletion of this S3 bucket
   # Can be set to false if you want to allow terraform destroy to clean up everything, but be careful! Do this is dev only.
