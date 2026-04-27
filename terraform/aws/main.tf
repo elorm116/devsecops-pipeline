@@ -488,7 +488,7 @@ resource "aws_launch_template" "app" { # checkov:skip=CKV_AWS_88:Instances run i
   block_device_mappings {
     device_name = "/dev/xvda"
     ebs {
-      volume_size           = 20
+      volume_size           = 30
       volume_type           = "gp3"
       encrypted             = true
       delete_on_termination = true
@@ -629,4 +629,143 @@ resource "aws_autoscaling_group" "app" {
   lifecycle {
     create_before_destroy = true
   }
+}
+
+################################################################################
+# GitHub Actions OIDC — Keyless CI authentication
+# Replaces static AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
+# Trust is bound to a specific repo + branch, not a long-lived secret
+################################################################################
+
+resource "aws_iam_openid_connect_provider" "github" {
+  url = "https://token.actions.githubusercontent.com"
+
+  # sts.amazonaws.com is the required audience for AssumeRoleWithWebIdentity
+  client_id_list = ["sts.amazonaws.com"]
+
+  # GitHub's OIDC TLS certificate thumbprints.
+  # Two thumbprints because GitHub rotated their cert — keeping both
+  # prevents breakage if AWS is still validating against the old one.
+  thumbprint_list = [
+    "6938fd4d98bab03faadb97b34396831e3780aea1",
+    "1c58a3a8518e8759bf075b76b750d4f2df264fcd"
+  ]
+}
+
+resource "aws_iam_role" "github_actions_ecr" {
+  name = "${var.project_name}-github-actions-role"
+
+  # Trust policy: defines WHO can assume this role.
+  # The Federated principal means "a token from this OIDC provider"
+  # The Condition is the security boundary — only your repo, only main branch.
+  # A fork of your repo cannot generate a token matching this sub claim.
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Federated = aws_iam_openid_connect_provider.github.arn
+        }
+        Action = "sts:AssumeRoleWithWebIdentity"
+        Condition = {
+          StringEquals = {
+            "token.actions.githubusercontent.com:sub" = "repo:elorm116/devsecops-pipeline:ref:refs/heads/main"
+            "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+          }
+        }
+      }
+    ]
+  })
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-github-actions-role"
+  })
+}
+
+resource "aws_iam_role_policy" "github_actions_ecr" {
+  name = "${var.project_name}-ecr-push-policy"
+  role = aws_iam_role.github_actions_ecr.id
+
+  # Permission policy: defines WHAT this role can do once assumed.
+  # GetAuthorizationToken must be Resource: * — it's account-level, not repo-level.
+  # All other actions are scoped to the two specific ECR repositories.
+  # No other AWS services. No IAM. No S3. No EC2. Pure least privilege.
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "ECRAuthToken"
+        Effect   = "Allow"
+        Action   = "ecr:GetAuthorizationToken"
+        Resource = "*"
+      },
+      {
+        Sid    = "ECRPushPull"
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+          "ecr:InitiateLayerUpload",
+          "ecr:UploadLayerPart",
+          "ecr:CompleteLayerUpload",
+          "ecr:PutImage",
+          "ecr:DescribeRepositories",
+          "ecr:ListImages"
+        ]
+        Resource = [
+          aws_ecr_repository.app_kms.arn,
+          aws_ecr_repository.juice_shop.arn
+        ]
+      }
+    ]
+  })
+}
+
+################################################################################
+# Juice Shop ECR repository
+# Previously created manually — now managed by Terraform to prevent drift.
+# No KMS here intentionally: Juice Shop is a deliberately vulnerable target,
+# keeping its registry config minimal avoids obscuring real security decisions.
+################################################################################
+
+resource "aws_ecr_repository" "juice_shop" {
+  #checkov:skip=CKV_AWS_51:Mutable tags required for latest convenience tag; deployments use digests
+  name                 = "juice-shop"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  encryption_configuration {
+    encryption_type = "KMS"
+    kms_key         = aws_kms_key.ecr.arn
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "juice-shop"
+  })
+}
+
+resource "aws_ecr_lifecycle_policy" "juice_shop" {
+  repository = aws_ecr_repository.juice_shop.name
+
+  policy = jsonencode({
+    rules = [
+      {
+        rulePriority = 1
+        description  = "Keep last 10 images"
+        selection = {
+          tagStatus   = "any"
+          countType   = "imageCountMoreThan"
+          countNumber = 10
+        }
+        action = {
+          type = "expire"
+        }
+      }
+    ]
+  })
 }
