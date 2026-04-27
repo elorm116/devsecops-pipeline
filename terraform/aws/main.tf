@@ -740,8 +740,7 @@ resource "aws_ecr_repository" "juice_shop" {
   }
 
   encryption_configuration {
-    encryption_type = "KMS"
-    kms_key         = aws_kms_key.ecr.arn
+    encryption_type = "AES256"
   }
 
   tags = merge(local.common_tags, {
