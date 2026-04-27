@@ -16,8 +16,6 @@ env:
   GCP_REGION: me-west1
   GCP_GAR_REPOSITORY: devsecops-pipeline-secure
 
-# Cancel in-progress runs on the same branch when a new push arrives.
-# Prevents redundant builds queuing up — important when builds take 10+ minutes.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -29,27 +27,45 @@ permissions:
   issues: write
 
 jobs:
+  # ── 0. Detect Changes ─────────────────────────────────────────────────────
+  # Determines which parts of the codebase changed.
+  # Downstream jobs use these outputs to decide whether to run.
+  # This prevents ZAP from running on every Terraform or manifest change —
+  # DAST only re-runs when application code actually changes.
+  detect-changes:
+    name: Detect Changed Paths
+    runs-on: ubuntu-latest
+    outputs:
+      flask: ${{ steps.filter.outputs.flask }}
+      juice: ${{ steps.filter.outputs.juice }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            flask:
+              - 'app/**'
+              - 'Dockerfile'
+            juice:
+              - 'juice-shop/**'
+
   # ── 1. SAST — Bandit ──────────────────────────────────────────────────────
-  # Runs on every push and PR — before build so we fail cheap.
   # Two-pass approach:
-  #   Pass 1: Report all medium+ findings, upload as artifact (never blocks)
-  #   Pass 2: Hard enforcement gate — fails pipeline on HIGH/CRITICAL only
-  # This avoids the || true anti-pattern while not blocking on noise.
+  #   Pass 1: Report medium+ findings as artifact (never blocks)
+  #   Pass 2: Hard enforcement gate — blocks on HIGH/CRITICAL only
+  # To suppress a legitimate finding use # nosec B603 with justification.
+  # Do NOT add || true or --exit-zero to Pass 2.
   sast:
     name: SAST — Bandit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
-
       - run: pip install bandit[toml]==1.9.4
 
-      # Pass 1: Full report — medium and above, JSON for artifact upload.
-      # exit-zero here is intentional — this pass is for visibility, not enforcement.
-      # The enforcement happens in Pass 2 below.
       - name: Bandit — Full Report (medium+)
         run: |
           bandit -r app/ \
@@ -64,7 +80,6 @@ jobs:
           name: bandit-report
           path: bandit-report.json
 
-      # Pass 2: Enforcement gate — HIGH and CRITICAL only, no exit-zero.
       - name: Bandit — Enforcement Gate (high/critical)
         run: |
           bandit -r app/ \
@@ -78,7 +93,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-
       - uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
@@ -87,7 +101,10 @@ jobs:
           exit-code: '1'
           severity: HIGH,CRITICAL
 
-  # ── 3. Build & Push ──────────────────────────────────────────────────────
+  # ── 3. Build & Push ───────────────────────────────────────────────────────
+  # Builds locally for scanning on every push/PR.
+  # Pushes to ECR/GAR on main branch only — OIDC auth, no static keys.
+  # PRs build and scan but never push to registries.
   build:
     name: Build & Push Images
     runs-on: ubuntu-latest
@@ -101,17 +118,11 @@ jobs:
       GCP_PROJECT_NUMBER: ${{ secrets.GCP_PROJECT_NUMBER }}
       GCP_WORKLOAD_IDENTITY_POOL: ${{ secrets.GCP_WORKLOAD_IDENTITY_POOL }}
       GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-
     steps:
       - uses: actions/checkout@v6
-
-      - name: Set up QEMU (multi-arch)
-        uses: docker/setup-qemu-action@v4
-
+      - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
 
-      # ── Flask — local build for scanning ─────────────────────────────────
-      # amd64 only for scan — multi-arch push happens later after scan passes.
       - name: Build and export Flask image
         uses: docker/build-push-action@v7
         with:
@@ -122,7 +133,7 @@ jobs:
           cache-to: type=gha,mode=max
           outputs: type=docker,dest=/tmp/image.tar
 
-      - name: Load Flask image into Docker daemon
+      - name: Load Flask image
         run: docker load -i /tmp/image.tar
 
       - uses: actions/upload-artifact@v7
@@ -130,7 +141,6 @@ jobs:
           name: docker-image
           path: /tmp/image.tar
 
-      # ── Juice Shop — local build for scanning ─────────────────────────────
       - name: Build and export Juice Shop image
         uses: docker/build-push-action@v7
         with:
@@ -141,7 +151,7 @@ jobs:
           cache-to: type=gha,mode=max
           outputs: type=docker,dest=/tmp/juice-shop.tar
 
-      - name: Load Juice Shop image into Docker daemon
+      - name: Load Juice Shop image
         run: docker load -i /tmp/juice-shop.tar
 
       - uses: actions/upload-artifact@v7
@@ -149,8 +159,7 @@ jobs:
           name: juice-shop-image
           path: /tmp/juice-shop.tar
 
-      # ── SBOMs ─────────────────────────────────────────────────────────────
-      - name: Generate Flask SBOM (Syft)
+      - name: Generate Flask SBOM
         uses: anchore/sbom-action@v0
         with:
           image: ${{ env.IMAGE_NAME }}:${{ github.sha }}
@@ -162,7 +171,7 @@ jobs:
           name: final-sbom
           path: ./app.sbom.json
 
-      - name: Generate Juice Shop SBOM (Syft)
+      - name: Generate Juice Shop SBOM
         uses: anchore/sbom-action@v0
         with:
           image: ${{ env.JUICE_SHOP_ECR_REPOSITORY }}:${{ github.sha }}
@@ -174,7 +183,8 @@ jobs:
           name: juice-shop-sbom
           path: ./juice-shop.sbom.json
 
-      # ── AWS — OIDC authentication ─────────────────────────────────────────
+      # AWS OIDC — no static keys. Role scoped to ECR push on two repos only.
+      # Trust policy binds to this repo + main branch — PRs cannot assume role.
       - name: Configure AWS credentials (OIDC)
         if: github.ref == 'refs/heads/main'
         uses: aws-actions/configure-aws-credentials@v4
@@ -188,7 +198,6 @@ jobs:
         id: ecr-login
         uses: aws-actions/amazon-ecr-login@v2
 
-      # ── ECR push — Flask ──────────────────────────────────────────────────
       - name: Build and push Flask to ECR
         if: github.ref == 'refs/heads/main'
         id: build-ecr
@@ -205,7 +214,6 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # ── ECR push — Juice Shop ─────────────────────────────────────────────
       - name: Build and push Juice Shop to ECR
         if: github.ref == 'refs/heads/main'
         id: build-juice-shop
@@ -222,7 +230,6 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # ── GCP — OIDC authentication ─────────────────────────────────────────
       - name: Authenticate to GCP
         if: github.ref == 'refs/heads/main' && env.GCP_PROJECT_NUMBER != '' && env.GCP_WORKLOAD_IDENTITY_POOL != '' && env.GCP_SERVICE_ACCOUNT != '' && env.GCP_PROJECT_ID != ''
         uses: google-github-actions/auth@v2
@@ -238,7 +245,6 @@ jobs:
         if: github.ref == 'refs/heads/main' && env.GCP_PROJECT_NUMBER != '' && env.GCP_WORKLOAD_IDENTITY_POOL != '' && env.GCP_SERVICE_ACCOUNT != '' && env.GCP_PROJECT_ID != ''
         run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev --quiet
 
-      # ── GAR push — Flask ──────────────────────────────────────────────────
       - name: Build and push Flask to GCP
         if: github.ref == 'refs/heads/main' && env.GCP_PROJECT_NUMBER != '' && env.GCP_WORKLOAD_IDENTITY_POOL != '' && env.GCP_SERVICE_ACCOUNT != '' && env.GCP_PROJECT_ID != ''
         id: build-gar
@@ -255,7 +261,6 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # ── Cosign — sign all images by digest ────────────────────────────────
       - name: Install Cosign
         if: github.ref == 'refs/heads/main'
         uses: sigstore/cosign-installer@v4.1.0
@@ -269,21 +274,13 @@ jobs:
           GAR_REF: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.GCP_GAR_REPOSITORY }}/${{ env.IMAGE_NAME }}@${{ steps.build-gar.outputs.digest }}
           JUICE_REF: ${{ steps.ecr-login.outputs.registry }}/${{ env.JUICE_SHOP_ECR_REPOSITORY }}@${{ steps.build-juice-shop.outputs.digest }}
         run: |
-          # Write key to disk only for the duration of signing, delete immediately after.
-          # The key never exists on disk outside this block.
           echo "$COSIGN_PRIVATE_KEY" > cosign.key
-
-          echo "Signing Flask ECR image..."
+          chmod 600 cosign.key
           cosign sign --key cosign.key "$ECR_REF"
-
           if [ -n "${{ secrets.GCP_PROJECT_ID }}" ]; then
-            echo "Signing Flask GAR image..."
             cosign sign --key cosign.key "$GAR_REF"
           fi
-
-          echo "Signing Juice Shop ECR image..."
           cosign sign --key cosign.key "$JUICE_REF"
-
           rm -f cosign.key
 
   # ── 4. Container Scan — Flask ─────────────────────────────────────────────
@@ -298,16 +295,14 @@ jobs:
       - name: Load Flask image
         run: docker load -i /tmp/image.tar
 
-      # Pass 1: Visibility — full SARIF report to GitHub Security tab
       - name: Trivy — Full Report (SARIF)
-        uses: aquasecurity/trivy-action@v0.35.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
           format: sarif
           output: trivy-results.sarif
           severity: HIGH,CRITICAL
 
-      # Pass 2: Enforcement — hard fail on fixable CRITICALs only
       - name: Trivy — Enforcement Gate
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -362,11 +357,8 @@ jobs:
             }
 
   # ── 5. Container Scan — Juice Shop ───────────────────────────────────────
-  # Report only — no enforcement gate.
-  # Juice Shop is a deliberately vulnerable application. It will always have
-  # CRITICAL findings. That is the point. Enforcing here would permanently
-  # break the pipeline for a known and accepted risk.
-  # Findings are still surfaced in the GitHub Security tab under "juice-shop".
+  # Report only — Juice Shop is deliberately vulnerable.
+  # Findings surfaced in GitHub Security tab, never block pipeline.
   juice-shop-scan:
     name: Container Scan — Trivy (Juice Shop)
     needs: build
@@ -378,7 +370,7 @@ jobs:
       - name: Load Juice Shop image
         run: docker load -i /tmp/juice-shop.tar
 
-      - name: Trivy — Juice Shop Report (SARIF, no enforcement)
+      - name: Trivy — Juice Shop Report (SARIF)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.JUICE_SHOP_ECR_REPOSITORY }}:${{ github.sha }}
@@ -393,35 +385,34 @@ jobs:
           category: juice-shop
 
   # ── 6. IaC Scan — Checkov ────────────────────────────────────────────────
+  # Hard enforcement — soft_fail removed.
+  # Accepted findings have inline checkov:skip comments in .tf files.
   iac-scan:
     name: IaC Scan — Checkov
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
+      - uses: actions/checkout@v6
       - uses: bridgecrewio/checkov-action@v12
         with:
           directory: terraform/
           framework: terraform
-          # soft_fail removed — this gate now enforces.
-          # To accept a finding: add checkov:skip=CKV_ID:justification
-          # in the relevant .tf file. Do not add soft_fail back.
           soft_fail: false
           output_format: cli
 
-  # ── 7. DAST — OWASP ZAP ──────────────────────────────────────────────────
-  dast:
-    name: DAST — OWASP ZAP
-    needs: [container-scan, juice-shop-scan, iac-scan]
+  # ── 7. DAST — Flask ───────────────────────────────────────────────────────
+  # Only runs when Flask code changes (app/** or Dockerfile).
+  # Skipped on Terraform, manifest, or Juice Shop only changes.
+  # ZAP enforces via rules.tsv — findings at FAIL level block pipeline.
+  # To accept a finding: add WARN or IGNORE entry to .zap/rules.tsv.
+  dast-flask:
+    name: DAST — ZAP (Flask)
+    needs: [container-scan, detect-changes]
+    if: needs.detect-changes.outputs.flask == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
-      # ── Flask DAST ────────────────────────────────────────────────────────
-      # ZAP baseline scan — crawls the app and checks for common issues.
-      # -I flag removed: ZAP now fails the pipeline on FAIL-level findings.
-      # To accept a finding: add it to .zap/rules.tsv as WARN or IGNORE with comment.
       - uses: actions/download-artifact@v8
         with: { name: docker-image, path: /tmp }
 
@@ -433,27 +424,34 @@ jobs:
           docker run -d --name staging-app \
             -p ${{ env.CONTAINER_PORT }}:${{ env.CONTAINER_PORT }} \
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
-          # Wait for app to be ready before ZAP starts scanning.
-          # A fixed sleep is fragile — replace with a health check loop.
           for i in $(seq 1 10); do
             curl -sf http://localhost:${{ env.CONTAINER_PORT }}/health && break
             echo "Waiting for app... ($i/10)"
             sleep 3
           done
 
-      - name: ZAP Baseline Scan — Flask App
+      - name: ZAP Baseline Scan — Flask
         uses: zaproxy/action-baseline@v0.15.0
         with:
           target: http://localhost:${{ env.CONTAINER_PORT }}
           rules_file_name: .zap/rules.tsv
-          # -I removed: ZAP now actually enforces FAIL-level rules.
-          # cmd_options intentionally left minimal — let rules.tsv control behavior.
 
-      # ── Juice Shop DAST ───────────────────────────────────────────────────
-      # Full scan — Juice Shop has real attack surface, baseline would miss too much.
-      # continue-on-error: true is correct here — 100+ findings are expected and
-      # intentional. This is a deliberately vulnerable app used for to test the pipeline.
-      # The SARIF report still surfaces in GitHub Security tab.
+      - name: Cleanup
+        if: always()
+        run: docker rm -f staging-app || true
+
+  # ── 8. DAST — Juice Shop ──────────────────────────────────────────────────
+  # Only runs when Juice Shop code changes (juice-shop/**).
+  # Full scan — Juice Shop has real attack surface.
+  # continue-on-error: true — 100+ findings expected and intentional.
+  dast-juice:
+    name: DAST — ZAP (Juice Shop)
+    needs: [juice-shop-scan, detect-changes]
+    if: needs.detect-changes.outputs.juice == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
       - uses: actions/download-artifact@v8
         with: { name: juice-shop-image, path: /tmp }
 
@@ -466,7 +464,6 @@ jobs:
             -p 3000:3000 \
             -e NODE_ENV=production \
             ${{ env.JUICE_SHOP_ECR_REPOSITORY }}:${{ github.sha }}
-          # Node.js cold start is slower than Flask — wait for readiness.
           for i in $(seq 1 15); do
             curl -sf http://localhost:3000 && break
             echo "Waiting for Juice Shop... ($i/15)"
@@ -482,26 +479,35 @@ jobs:
 
       - name: Cleanup
         if: always()
-        run: docker rm -f staging-app juice-staging || true
+        run: docker rm -f juice-staging || true
 
-  # ── 8. Deploy — GitOps manifest update ───────────────────────────────────
-  # Updates kustomize overlays with the new image digest.
+  # ── 9. Deploy — GitOps manifest update ───────────────────────────────────
+  # Runs if DAST jobs passed OR were skipped (no relevant code changed).
+  # Blocked if DAST ran and failed — security gate holds.
+  # skipped != failed here: skipped means "no attack surface changed,
+  # prior scan still valid." Failed means "new code introduced a finding."
+  # GitHub App token replaces GITOPS_PAT — ephemeral 1hr token, machine identity.
   deploy:
     name: Sync GitOps Manifests
     runs-on: ubuntu-latest
-    needs: [dast, build]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && !contains(github.event.head_commit.message, '[skip ci]')
+    needs: [dast-flask, dast-juice, build, iac-scan]
+    if: |
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'push' &&
+      !contains(github.event.head_commit.message, '[skip ci]') &&
+      (needs.dast-flask.result == 'success' || needs.dast-flask.result == 'skipped') &&
+      (needs.dast-juice.result == 'success' || needs.dast-juice.result == 'skipped') &&
+      needs.iac-scan.result == 'success'
     steps:
       - name: Generate GitHub App token
         id: app-token
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ secrets.GITOPS_APP_ID }}
+          client-id: ${{ secrets.GITOPS_APP_ID }}
           private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
-          # Use the ephemeral installation token, not the PAT
           token: ${{ steps.app-token.outputs.token }}
           ref: main
           fetch-depth: 0

@@ -5,8 +5,10 @@
 #
 
 grafana:
-  enabled: true
-  adminPassword: changeme       # override with a Kubernetes Secret in production
+  admin:
+    existingSecret: grafana-admin-secret
+    userKey: admin-user
+    passwordKey: admin-password      # override with a Kubernetes Secret in production
   resources:
     requests:
       memory: 128Mi
