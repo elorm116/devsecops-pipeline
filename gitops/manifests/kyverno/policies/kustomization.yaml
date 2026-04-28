@@ -10,3 +10,4 @@ resources:
   - verify-image-signature.yaml
   - cleanup-policy.yaml
   - juice-shop-exceptions.yaml  # Scoped rules for juice-shop namespace
+  - monitoring-policies.yaml     # Scoped rules for monitoring namespace

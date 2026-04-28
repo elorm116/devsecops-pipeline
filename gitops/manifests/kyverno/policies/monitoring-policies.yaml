@@ -1,0 +1,100 @@
+# gitops/manifests/kyverno/policies/monitoring-policy.yaml
+#
+# Security enforcement for the monitoring namespace.
+# kube-prometheus-stack Helm chart already sets correct security contexts —
+# these policies ensure they can never be accidentally removed or overridden.
+# 
+# Grafana is excluded from readOnlyRootFilesystem enforcement because it
+# writes SQLite data and session files at runtime. All other monitoring
+# components run with read-only filesystems.
+#
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: monitoring-require-non-root
+  annotations:
+    policies.kyverno.io/title: Monitoring — Require Non-Root
+    policies.kyverno.io/severity: high
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: check-non-root
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [monitoring]
+      validate:
+        message: "All monitoring pods must run as non-root."
+        pattern:
+          spec:
+            securityContext:
+              runAsNonRoot: true
+
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: monitoring-disallow-privileged
+  annotations:
+    policies.kyverno.io/title: Monitoring — Disallow Privileged
+    policies.kyverno.io/severity: critical
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: check-not-privileged
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [monitoring]
+      validate:
+        message: "Privileged containers not allowed in monitoring namespace."
+        pattern:
+          spec:
+            containers:
+              - =(securityContext):
+                  =(privileged): false
+                  allowPrivilegeEscalation: false
+
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: monitoring-require-readonly-fs
+  annotations:
+    policies.kyverno.io/title: Monitoring — Require Read-Only Filesystem
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >
+      Enforces readOnlyRootFilesystem on all monitoring containers except Grafana.
+      Grafana writes SQLite and session data at runtime — exempted intentionally.
+      All other components (Prometheus, Alertmanager, exporters) have no legitimate
+      reason to write to their root filesystem.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: check-readonly-fs
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [monitoring]
+      exclude:
+        any:
+          - resources:
+              selector:
+                matchLabels:
+                  app.kubernetes.io/name: grafana
+      validate:
+        message: >
+          Monitoring containers must set readOnlyRootFilesystem: true.
+          Exception: Grafana is excluded — it requires writable fs for SQLite.
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  readOnlyRootFilesystem: true
