@@ -1,10 +1,10 @@
 # DevSecOps Pipeline — AWS + Raspberry Pi Homelab
 
 ![Pipeline](https://img.shields.io/github/actions/workflow/status/elorm116/devsecops-pipeline/juice-shop-pipeline.yaml?label=pipeline&logo=githubactions&logoColor=white)
-![Security Gates](https://img.shields.io/badge/security%20gates-6%20passing-brightgreen?logo=shield)
+![Security Gates](https://img.shields.io/badge/security%20gates-9%20active-brightgreen?logo=shield)
 ![IaC](https://img.shields.io/badge/IaC-Terraform-7B42BC?logo=terraform)
 ![Cloud](https://img.shields.io/badge/cloud-AWS-FF9900?logo=amazonaws)
-![Kubernetes](https://img.shields.io/badge/kubernetes-k3s-326CE5?logo=kubernetes)
+![Kubernetes](https://img.shields.io/badge/kubernetes-k3s%20v1.34.6-326CE5?logo=kubernetes)
 ![GitOps](https://img.shields.io/badge/GitOps-ArgoCD-EF7B4D?logo=argo)
 ![Multi-arch](https://img.shields.io/badge/image-amd64%20%7C%20arm64-blue?logo=docker)
 ![Kustomize](https://img.shields.io/badge/config-Kustomize-FF6C37)
@@ -122,7 +122,7 @@ kubectl apply → zero-downtime rolling deploy
 Every deploy is a Git commit. Every rollback is git revert.
 ```
 
-### The "Direct" architecture (Pi ingress)
+### The ingress architecture
 
 `cloudflared` runs as an in-cluster Deployment. Public traffic flows:
 
@@ -139,17 +139,17 @@ Zero open inbound ports on the Pi. No NAT rules. No port forwarding. The Pi init
 
 | Gate | Tool | Failure mode | What it catches |
 |------|------|-------------|----------------|
-| SAST | Bandit | Warn + artifact | Insecure Python patterns — `eval()`, shell injection, weak crypto |
+| SAST | Bandit | Warn + artifact (HIGH+ enforcement gate) | Insecure Python patterns — `eval()`, shell injection, weak crypto |
 | Secret scan | Trivy (filesystem) | **Hard fail** | Credentials, API keys, tokens committed to source |
 | Container scan — Flask | Trivy + SARIF | **Hard fail on CRITICAL** | CVEs in image layers (blocks build on unfixable criticals) |
 | Container scan — Juice Shop | Trivy + SARIF | Report only | CVEs in npm tree (expected — intentionally vulnerable) |
-| IaC scan | Checkov | Warn + artifact | Terraform misconfigurations — open security groups, broad IAM |
+| IaC scan | Checkov | **Hard fail on configured checks** | Terraform misconfigurations — open security groups, broad IAM |
 | DAST — Flask | OWASP ZAP baseline | Warn + artifact | Missing headers, weak hardening, exposed attack surface |
 | DAST — Juice Shop | OWASP ZAP full scan | Report only | 100+ OWASP Top 10 findings (expected — intentionally vulnerable) |
 | Image signing | Cosign + Kyverno | **Hard fail at admission** | Blocks any unsigned or tampered image from running in cluster |
 | Pod security | Kyverno ClusterPolicies | **Hard fail at admission** | Root containers, privileged mode, missing limits |
 
-Hard-fail gates: secret scanning, CRITICAL container vulnerabilities (Flask only), unsigned images, and policy-violating pod specs. Juice Shop scans are report-only because findings are the point, not the gate.
+Hard-fail gates: secret scanning, CRITICAL container vulnerabilities (Flask only), Checkov-configured IaC checks, unsigned images, and policy-violating pod specs. Juice Shop scans are report-only because findings are the point, not the gate.
 
 ---
 
@@ -349,7 +349,7 @@ And in the GitHub Security tab (repository → Security → Code scanning):
 
 ### 1. Shift-left security (CI stage)
 
-- **SAST (Bandit):** automated Python static analysis to catch insecure code patterns early in CI.
+- **SAST (Bandit):** two-pass approach — full report at medium+ severity as an artifact, plus a hard enforcement gate blocking the pipeline on HIGH/CRITICAL findings.
 - **Secret scanning (Trivy):** repository scan runs as a blocking gate to prevent leaked credentials from entering the delivery path.
 - **SCA and SBOM (Syft):** the pipeline generates CycloneDX SBOMs for both the Flask app and Juice Shop. The Juice Shop SBOM captures a real vulnerable dependency graph.
 
@@ -362,9 +362,10 @@ And in the GitHub Security tab (repository → Security → Code scanning):
 
 ### 3. Continuous deployment and GitOps
 
-- **Automated manifest updates:** GitHub Actions patches GitOps manifests with `@sha256` digests on every push to main.
+- **Automated manifest updates:** GitHub Actions patches GitOps manifests with `@sha256` digests on every push to main. The deploy job runs only when a new image was actually built — config-only changes are picked up by ArgoCD directly from git without a pipeline deploy job.
 - **ArgoCD orchestration:** pull-based sync continuously reconciles cluster state to Git state.
 - **Traceable rollbacks:** every deploy is a Git commit; rollback is a standard `git revert`.
+- **GitHub App token:** the deploy job uses a short-lived GitHub App token (1hr expiry) rather than a long-lived PAT. Machine identity, not personal credentials.
 
 ### 4. Cluster-side enforcement (admission control)
 
@@ -378,7 +379,7 @@ And in the GitHub Security tab (repository → Security → Code scanning):
 ## Infrastructure overview
 
 - **Cloud:** AWS (ECR/EC2/ALB via Terraform) and GCP (GAR path retained for multi-cloud pipeline support).
-- **Edge:** Raspberry Pi 5 running k3s as the primary live cluster.
+- **Edge:** Raspberry Pi 5 running k3s v1.34.6+k3s1 as the primary live cluster.
 - **Ingress:** Cloudflare Tunnel via in-cluster `cloudflared` Deployment — zero open inbound ports.
 - **Security toolchain:** Cosign, Kyverno, Trivy, Bandit, Checkov, OWASP ZAP, Syft.
 
@@ -398,7 +399,13 @@ And in the GitHub Security tab (repository → Security → Code scanning):
 
 **Hardened pod security context** — containers run as non-root (UID 1000), with `readOnlyRootFilesystem: true` (Flask), `allowPrivilegeEscalation: false`, and all Linux capabilities dropped. Juice Shop gets a scoped exception for `readOnlyRootFilesystem` because its SQLite database and Express server require a writable filesystem — documented and enforced via a namespace-scoped policy exception.
 
-**Cloudflare Tunnel over port forwarding** — the Pi has zero open inbound ports. The tunnel creates an outbound-only encrypted connection to Cloudflare's edge.
+**Cloudflare Tunnel for ingress** — the Pi has zero open inbound ports. The `cloudflared` Deployment maintains an outbound-only encrypted connection to Cloudflare's edge. All public traffic is proxied back through it. No NAT, no port forwarding, no public IP exposure.
+
+**GitHub App over PAT** — the deploy job authenticates to GitHub using a GitHub App token rather than a personal access token. The token is scoped to only the required repository, expires after one hour, and appears as a bot identity in commit history and audit logs.
+
+**IaC gate with explicit suppressions** — Checkov runs with `soft_fail: false` on a defined list of enforced checks. Findings that are accepted carry inline `checkov:skip=CKV_ID:justification` comments in the Terraform source. This is the difference between risk ignored (blanket `soft_fail`) and risk accepted (explicit, reviewable audit trail in code).
+
+**Pipeline exit codes as the security boundary** — GitHub Actions has one concept: did this step exit 0 or non-zero? `|| true`, `soft_fail`, and `-I` all produce exit 0 regardless of findings. The tool runs, produces output, and the pipeline proceeds. In this project, every gate that is meant to block does so through a real non-zero exit code — no soft exits on enforced checks.
 
 ---
 
@@ -417,7 +424,7 @@ And in the GitHub Security tab (repository → Security → Code scanning):
 - VPC, ALB, EC2, ECR (scan-on-push), IAM (least privilege), S3 remote state
 
 **Kubernetes — Raspberry Pi 5**
-- k3s, ArgoCD (App of Apps), Kustomize, Kyverno, kube-prometheus-stack, Cloudflare Tunnel
+- k3s v1.34.6+k3s1, ArgoCD (App of Apps), Kustomize, Kyverno, kube-prometheus-stack, Cloudflare Tunnel
 
 ---
 
@@ -435,8 +442,22 @@ devsecops-pipeline/
 │
 ├── Dockerfile                         # Flask — multi-stage, non-root, multi-arch
 │
+├── ansible/
+│   ├── inventory.ini
+│   └── pi-setup.yaml                  # Pi node provisioning
+│
+├── scripts/
+│   ├── health-check.sh
+│   └── setup-argocd-image-updater.sh
+│
 ├── terraform/
 │   ├── aws/                           # VPC, ALB, EC2, ECR, IAM, S3 state
+│   │   ├── backend.tf
+│   │   ├── main.tf
+│   │   ├── outputs.tf
+│   │   ├── userdata.sh
+│   │   ├── variables.tf
+│   │   └── terraform-bootstrap/       # S3 + DynamoDB state backend bootstrap
 │   └── gke/                           # GKE Autopilot (optional)
 │
 ├── gitops/
@@ -445,34 +466,59 @@ devsecops-pipeline/
 │   │
 │   ├── apps-pi/                       # ArgoCD Applications for the Pi cluster
 │   │   ├── flask-app.yaml
-│   │   ├── juice-shop.yaml            # Juice Shop ArgoCD Application
+│   │   ├── juice-shop.yaml
 │   │   ├── apps-shared.yaml
 │   │   ├── cloudflared-app.yaml
 │   │   ├── kyverno-refresher-app.yaml # ECR token refresher for Kyverno namespace
 │   │   └── sealed-secrets-app.yaml
 │   │
-│   ├── apps-shared/
+│   ├── apps-gke/                      # ArgoCD Applications for GKE cluster
+│   │   ├── argocd-networking.yaml
+│   │   └── flask-app.yaml
+│   │
+│   ├── apps-shared/                   # Shared apps deployed to all clusters
 │   │   ├── monitoring.yaml
 │   │   ├── kyverno.yaml
 │   │   └── kyverno-policies.yaml
 │   │
 │   └── manifests/
-│       ├── flask-app/
+│       ├── argocd/
 │       │   ├── base/
 │       │   └── overlays/
+│       │       ├── gke/               # GKE-specific ArgoCD networking (BackendConfig, cert)
+│       │       └── pi/
+│       │
+│       ├── flask-app/
+│       │   ├── base/
+│       │   │   ├── deployment.yaml
+│       │   │   ├── ingress.yaml
+│       │   │   ├── service.yaml
+│       │   │   └── namespace.yaml
+│       │   └── overlays/
 │       │       ├── pi/
-│       │       │   └── patch-image.yaml   # ← pipeline writes @sha256 digest here
+│       │       │   ├── patch-image.yaml      # ← pipeline writes @sha256 digest here
+│       │       │   ├── patch-probes.yaml
+│       │       │   └── patch-replicas.yaml
 │       │       └── gke/
-│       │           └── patch-image.yaml   # ← pipeline writes @sha256 digest here
+│       │           ├── patch-image.yaml      # ← pipeline writes @sha256 digest here
+│       │           ├── patch-pullsecret.yaml
+│       │           ├── patch-replicas.yaml
+│       │           └── patch-service.yaml
 │       │
 │       ├── juice-shop/
 │       │   ├── base/
+│       │   │   ├── deployment.yaml
+│       │   │   ├── ingress.yaml
+│       │   │   ├── service.yaml
+│       │   │   └── namespace.yaml
 │       │   └── overlays/pi/
-│       │       ├── patch-image.yaml       # ← pipeline writes @sha256 digest here
+│       │       ├── patch-image.yaml          # ← pipeline writes @sha256 digest here
 │       │       └── patch-replicas.yaml
 │       │
 │       ├── kyverno/
 │       │   ├── values.yaml
+│       │   ├── rbac/
+│       │   │   └── cleanup-controller-policyreport-rbac.yaml
 │       │   └── policies/
 │       │       ├── verify-image-signature.yaml
 │       │       ├── disallow-privileged.yaml
@@ -480,16 +526,31 @@ devsecops-pipeline/
 │       │       ├── require-readonly-fs.yaml
 │       │       ├── require-resource-limits.yaml
 │       │       ├── juice-shop-exceptions.yaml
+│       │       ├── monitoring-policies.yaml
 │       │       └── cleanup-policy.yaml
 │       │
+│       ├── monitoring/
+│       │   ├── values.yaml
+│       │   └── custom-resources/
+│       │       ├── servicemonitor.yaml
+│       │       ├── traefik-monitor.yaml
+│       │       └── grafana-sealed-secret.yaml
+│       │
 │       └── utils/
-│           ├── cloudflared/
-│           ├── ecr-refresher/             # ECR token refresher for devsecops-app
-│           ├── kyverno-ecr-refresher/     # ECR token refresher for kyverno + regcred propagation
+│           ├── cloudflared/                  # Cloudflare Tunnel in-cluster deployment
+│           │   ├── base/
+│           │   └── overlays/pi/
+│           ├── ecr-refresher/                # ECR token refresher for devsecops-app
+│           │   ├── cronjob.yaml
+│           │   ├── rbac.yaml
+│           │   └── sealed-aws-ecr-creds.yaml
+│           ├── kyverno-ecr-refresher/        # ECR token refresher for kyverno namespace
+│           │   ├── cronjob.yaml
+│           │   ├── rbac.yaml
+│           │   └── sealed-aws-ecr-creds.yaml
 │           └── sealed-secrets/
-│
-├── .zap/
-│   └── rules.tsv
+│               ├── base/
+│               └── overlays/pi/
 │
 └── .github/
     └── workflows/
@@ -558,11 +619,11 @@ GitHub Actions secrets required:
 
 | Secret | Value |
 |--------|-------|
-| `AWS_ACCESS_KEY_ID` | IAM user access key |
-| `AWS_SECRET_ACCESS_KEY` | IAM user secret |
+| `AWS_ROLE_ARN` | IAM role ARN for OIDC federation (no static keys needed) |
 | `COSIGN_PRIVATE_KEY` | Cosign private key (from `cosign generate-key-pair`) |
 | `COSIGN_PASSWORD` | Cosign key password |
-| `GITOPS_PAT` | GitHub PAT with repo write scope |
+| `GITOPS_APP_CLIENT_ID` | GitHub App client ID |
+| `GITOPS_APP_PRIVATE_KEY` | GitHub App private key (PEM) |
 | `SLACK_WEBHOOK` | Slack incoming webhook URL |
 
 Optional (only if you want GAR pushes enabled):
@@ -573,6 +634,8 @@ Optional (only if you want GAR pushes enabled):
 | `GCP_PROJECT_NUMBER` | GCP project number |
 | `GCP_WORKLOAD_IDENTITY_POOL` | WIF pool name |
 | `GCP_SERVICE_ACCOUNT` | Service account email for WIF |
+
+AWS authentication uses OIDC federation — the pipeline assumes an IAM role via GitHub's OIDC token. No static AWS access keys are stored anywhere. The IAM role trust policy is scoped to this repository and the `main` branch only.
 
 ---
 
@@ -617,6 +680,22 @@ kubectl create job ecr-token-refresher-init \
   --from=cronjob/kyverno-ecr-token-refresher \
   -n kyverno
 ```
+
+---
+
+## Known gaps and next steps
+
+| Gap | Priority | Accepted Risk Rationale | Recommended Fix |
+|-----|----------|------------------------|-----------------|
+| ECR refresher downloads kubectl via curl with no hash verification | Medium | CronJob runs inside cluster with limited blast radius. kubectl binary pulled from official dl.k8s.io. | Add SHA256 verification step. Pin kubectl version. Bake binary into a custom refresher image. |
+| Alertmanager has no PrometheusRules — wired to Slack but silent | Medium | Monitoring is visible in Grafana dashboards. No automated alerting on critical events (OOM, pod crash, cert expiry). | Define rules for: pod crash loops, node memory pressure, disk pressure, Kyverno webhook down. |
+| No NetworkPolicies — pods communicate freely across namespaces | Medium | All pods are on the same Pi node. Lateral movement risk is real if any pod is compromised. Juice Shop co-located with production workload. | Default-deny ingress per namespace, explicit allow rules for Traefik → app and Prometheus → metrics. |
+| Sealed Secrets controller key has no backup | Medium | Key loss means all SealedSecrets become undecryptable. Full re-sealing of all secrets required. | `kubectl get secret -n kube-system -l sealedsecrets.bitnami.com/sealed-secrets-key -o yaml` — store encrypted offline. |
+| No centralized log aggregation (Loki/Promtail) | Medium | Pod logs lost on restart. No historical log search across the cluster. | Deploy Loki with aggressive retention limits (~2Gi). Pi memory budget: ~200MB combined for Loki + Promtail. |
+| No runtime security (Falco/Tetragon) | Medium | No detection of anomalous syscalls, file access, or network connections at runtime. Kyverno is admission-only — it does not observe running containers. | Pi 5 has BTF support (`ls /sys/kernel/btf/vmlinux`). Start with Falco eBPF driver. Add Tetragon later for syscall-level enforcement. |
+| Flask-Limiter uses in-memory rate limit storage | Low | Two replicas have independent counters — effective rate limit is 2× the configured value. Counters reset on pod restart. | Deploy Redis and set `REDIS_URL` in Flask deployment. Acceptable for current traffic volume. |
+| Grafana persistence disabled | Low | Manually created dashboards lost on pod restart. Committed ConfigMap dashboards survive. | Enable PVC (`1Gi`) or commit all dashboards as ConfigMaps with `grafana_dashboard: "1"` label. |
+| /metrics endpoint reachable via tunnel path | Low | Prometheus metrics expose version and request data. Currently only reachable if tunnel routes it — verify config excludes the path. | Add Cloudflare Access policy or Traefik middleware to restrict `/metrics` to internal CIDR only. |
 
 ---
 
@@ -774,18 +853,30 @@ unexpected status code 401 Unauthorized (retried 5 times)
 
 ### 11. ArgoCD repo-server pod stuck in Unknown state
 
-**Symptom:** All ArgoCD applications showing `Unknown` sync status. `pi-infra` showed:
+**Symptom:** All ArgoCD applications showing `Unknown` sync status.
 
 ```
 dial tcp 10.43.154.152:8081: connect: connection refused
 ```
 
-**Root cause:** The `argocd-repo-server` pod got stuck in `Unknown` state after a node instability event. Without the repo-server, ArgoCD cannot render manifests or compute target state.
+**Root cause:** The `argocd-repo-server` pod entered an `Unknown` state after a node instability event (OOM or network interruption). Without the repo-server, ArgoCD cannot render manifests or compute target state. All applications go `Unknown` immediately.
 
-**Fix:** Force delete the stuck pod and let Kubernetes recreate it:
+**Mitigation:** Explicit resource requests and limits are set on all system components — ArgoCD, Kyverno, Prometheus — so the Linux OOM killer targets lower-priority workloads first under memory pressure.
+
+**Fix:** Force-delete the stuck pod and let Kubernetes recreate it:
 
 ```bash
 kubectl delete pod -n argocd argocd-repo-server-<pod-id> --force --grace-period=0
+
+# Then verify it comes back healthy
+kubectl get pods -n argocd -w
+```
+
+Check for OOM events if the issue recurs:
+
+```bash
+sudo dmesg | grep -i "oom\|killed" | tail -20
+free -h
 ```
 
 ---
@@ -859,22 +950,8 @@ ingress:
 
 ---
 
-## Known gaps and next steps
-
-| Item | Status | Plan |
-|------|--------|------|
-| Flask-Limiter in-memory storage | Open | Deploy Redis to sync rate-limit state across pod replicas |
-| ECR pull secret rotation | ✅ Resolved | CronJobs running in `devsecops-app` and `kyverno` namespaces |
-| Grafana persistence | Open | Persistent volume claim so dashboards survive pod restarts |
-| Single-node k3s | By design | HA requires a second Pi |
-| Juice Shop Cloudflare Access | Recommended | Add Access policy on `juice.learndevops.site` — it is intentionally vulnerable |
-| Kyverno OutOfSync | Open | Kyverno ArgoCD app shows OutOfSync — CRD drift investigation pending |
-
----
-
 ## Author
 
 Anthony — DevOps & Cloud Engineer
 
 [GitHub](https://github.com/elorm116) · [LinkedIn](https://linkedin.com/inaezottor/) · [Live demo](https://web.learndevops.site) · [Juice Shop](https://juice.learndevops.site)
-
