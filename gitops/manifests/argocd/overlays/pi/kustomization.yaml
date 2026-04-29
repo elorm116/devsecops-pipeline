@@ -1,30 +1,11 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-
 resources:
   - ../../base
-
 patches:
-  - target:
-      kind: Ingress
-      name: argocd-server-ingress
-    patch: |-
-      - op: replace
-        path: /spec/ingressClassName
-        value: traefik
-      - op: replace
-        path: /spec/rules/0/host
-        value: pi-argo.learndevops.site
-      - op: replace
-        path: /spec/rules/0/http/paths/0/backend/service/port/number
-        value: 80
-      - op: add
-        path: /metadata/annotations/traefik.ingress.kubernetes.io~1router.entrypoints
-        value: web
-      - op: add
-        path: /metadata/annotations/traefik.ingress.kubernetes.io~1router.tls
-        value: "false"
-
+  # argocd-server runs in insecure mode because TLS is terminated
+  # at the Cloudflare edge. Cloudflared tunnel connects directly to
+  # argocd-server.argocd.svc.cluster.local:80 — no ingress controller needed.
   - target:
       kind: Deployment
       name: argocd-server
@@ -32,3 +13,21 @@ patches:
       - op: add
         path: /spec/template/spec/containers/0/args/-
         value: "--insecure"
+
+  # repo-server had no resource limits — BestEffort QoS class means
+  # it's first to be OOM killed under memory pressure. This caused
+  # repeated Unknown pod status on the Pi.
+  # Setting limits moves it to Burstable QoS — predictable behavior.
+  - target:
+      kind: Deployment
+      name: argocd-repo-server
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            memory: 128Mi
+            cpu: 50m
+          limits:
+            memory: 256Mi
+            cpu: 200m

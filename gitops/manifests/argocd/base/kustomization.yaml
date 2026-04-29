@@ -1,4 +1,6 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-resources:
-  - ingress.yaml
+resources: []
+# ingress.yaml removed — was a Traefik IngressRoute CRD
+# Routing handled by Cloudflared tunnel directly to argocd-server service
+# No ingress controller needed or present
