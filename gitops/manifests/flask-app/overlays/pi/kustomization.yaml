@@ -11,6 +11,7 @@ namespace: devsecops-app
 resources:
   - ../../base                  # pull in all base manifests
   - ../../../utils/ecr-refresher 
+  - network-policy.yaml           # Pi-specific NetworkPolicy with correct port numbers
 
 patches:
   - path: patch-image.yaml      # pipeline updates image tag here
