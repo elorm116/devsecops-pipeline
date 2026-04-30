@@ -14,8 +14,5 @@ patches:
   - path: patch-image.yaml
   - path: patch-replicas.yaml
   - path: patch-probes.yaml
-labels:
-  - pairs:
-      environment: pi-homelab
-    includeSelectors: false
-    includeTemplates: true
+commonLabels:
+  environment: pi-homelab
