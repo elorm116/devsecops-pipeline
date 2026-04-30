@@ -1,0 +1,78 @@
+#jgitops/manifests/juice-shop/base/network-policy.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: juice-shop-deny-all
+  namespace: juice-shop
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: juice-shop
+  policyTypes:
+  - Ingress
+  - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: juice-shop-allow-cloudflared
+  namespace: juice-shop
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: juice-shop
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          app: cloudflared
+    ports:
+    - port: 3000
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: juice-shop-allow-prometheus
+  namespace: juice-shop
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: juice-shop
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+    ports:
+    - port: 3000
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: juice-shop-allow-egress-dns
+  namespace: juice-shop
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: juice-shop
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
