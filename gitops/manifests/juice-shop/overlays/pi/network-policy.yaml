@@ -1,0 +1,41 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: juice-shop-ingress
+  namespace: juice-shop
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: juice-shop
+  policyTypes:
+    - Ingress
+  ingress:
+    # Cloudflared → Juice Shop
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values:
+                  - cloudflared
+      ports:
+        - protocol: TCP
+          port: 3000
+
+---
+# Default deny all ingress in this namespace.
+# Any pod without an explicit allow NetworkPolicy gets no ingress traffic.
+# This is the baseline — the rules above are exceptions to this.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: devsecops-app  # change to juice-shop in the other file
+spec:
+  podSelector: {}  # empty selector = applies to ALL pods in namespace
+  policyTypes:
+    - Ingress
+  # No ingress rules = deny all ingress

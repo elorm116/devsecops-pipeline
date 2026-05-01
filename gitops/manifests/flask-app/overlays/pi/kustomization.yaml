@@ -1,13 +1,21 @@
 # gitops/manifests/flask-app/overlays/pi/kustomization.yaml
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+
 namespace: devsecops-app
+
 resources:
   - ../../base
   - ../../../utils/ecr-refresher
+  - network-policy.yaml
+
 patches:
   - path: patch-image.yaml
   - path: patch-replicas.yaml
   - path: patch-probes.yaml
-commonLabels:
-  environment: pi-homelab
+
+labels:
+  - pairs:
+      environment: pi-homelab
+    includeSelectors: false
+    includeTemplates: true

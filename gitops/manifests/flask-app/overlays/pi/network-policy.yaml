@@ -1,0 +1,62 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: devsecops-api-ingress
+  namespace: devsecops-app
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: devsecops-api
+  policyTypes:
+    - Ingress
+  ingress:
+    # Cloudflared → Flask
+    # namespaceSelector + podSelector in same from[] entry = AND logic
+    # Two separate entries would be OR — allows any pod in kube-system
+    # OR any pod named cloudflared anywhere. Never do that.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            # matchExpressions escapes Kustomize label transformer mutation.
+            # Transformer targets matchLabels fields only — skips matchExpressions.
+            # Correct tool regardless of the mutation issue: expresses
+            # "key exists and equals value" without requiring matchLabels.
+            matchExpressions:
+              - key: app
+                operator: In
+                values:
+                  - cloudflared
+      ports:
+        - protocol: TCP
+          port: 5000
+    # Prometheus → Flask (metrics scraping)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - prometheus
+      ports:
+        - protocol: TCP
+          port: 5000
+
+---
+# Default deny all ingress in this namespace.
+# Any pod without an explicit allow NetworkPolicy gets no ingress traffic.
+# This is the baseline — the rules above are exceptions to this.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: devsecops-app  # change to juice-shop in the other file
+spec:
+  podSelector: {}  # empty selector = applies to ALL pods in namespace
+  policyTypes:
+    - Ingress
+  # No ingress rules = deny all ingress

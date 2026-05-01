@@ -11,10 +11,14 @@ namespace: juice-shop
 
 resources:
   - ../../base
+  - network-policy.yaml
 
 patches:
-  - path: patch-image.yaml          # Pipeline writes @sha256 digest here
-  - path: patch-replicas.yaml       # Pi: 1 replica to save RAM
+  - path: patch-image.yaml
+  - path: patch-replicas.yaml
 
-commonLabels:
-  environment: pi-homelab
+labels:
+  - pairs:
+      environment: pi-homelab
+    includeSelectors: false
+    includeTemplates: true
