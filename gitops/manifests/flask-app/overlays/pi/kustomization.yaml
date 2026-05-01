@@ -1,15 +1,10 @@
 # gitops/manifests/flask-app/overlays/pi/kustomization.yaml
-#
-# Pi-specific overlay. References the base and applies patches.
-# The pipeline ONLY touches patch-image.yaml — nothing else changes.
-#
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: devsecops-app
 resources:
   - ../../base
   - ../../../utils/ecr-refresher
-  - network-policy.yaml
 patches:
   - path: patch-image.yaml
   - path: patch-replicas.yaml
