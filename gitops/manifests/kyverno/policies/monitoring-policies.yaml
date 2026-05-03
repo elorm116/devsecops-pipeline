@@ -98,3 +98,26 @@ spec:
             containers:
               - securityContext:
                   readOnlyRootFilesystem: true
+
+---
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: node-exporter-exception
+  namespace: kyverno
+spec:
+  exceptions:
+    - policyName: monitoring-disallow-privileged
+      ruleNames:
+        - check-not-privileged
+        - autogen-check-not-privileged
+  match:
+    any:
+      - resources:
+          kinds:
+            - Pod
+            - DaemonSet
+          namespaces:
+            - monitoring
+          names:
+            - kube-prometheus-prometheus-node-exporter*
