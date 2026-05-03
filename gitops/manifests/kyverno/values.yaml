@@ -4,6 +4,7 @@
 
 admissionController:
   replicas: 1
+  priorityClassName: system-cluster-critical
   container:
     extraArgs:
       webhookTimeout: "30"    # must be a string, not integer
